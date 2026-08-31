@@ -1,0 +1,74 @@
+[
+  {
+    "name": "tile-select",
+    "seconds": 1,
+    "prompt": "A single small wooden letter tile picked up and tapped onto a wooden board, short soft knock with a light fingertip click.",
+    "event": "select"
+  },
+  {
+    "name": "tile-deselect",
+    "seconds": 1,
+    "prompt": "A small wooden letter tile set back down gently on a felt-lined tray, soft muted wooden tap, quieter and lower than a pick-up.",
+    "event": "deselect"
+  },
+  {
+    "name": "tray-clear",
+    "seconds": 1,
+    "prompt": "Several small wooden letter tiles swept off a board in one quick sliding motion, a brief clatter of wood pieces sliding together.",
+    "event": "clear"
+  },
+  {
+    "name": "tray-shuffle",
+    "seconds": 2,
+    "prompt": "A handful of wooden letter tiles being shaken and shuffled around inside a small wooden tray, rattling clicks and knocks.",
+    "event": "shuffle"
+  },
+  {
+    "name": "ui-click",
+    "seconds": 1,
+    "prompt": "A crisp, subtle UI button click, like a small plastic switch being pressed once, short and clean.",
+    "event": "uiClick"
+  },
+  {
+    "name": "submit-invalid",
+    "seconds": 1,
+    "prompt": "A dull rejected buzz, like a rubber stamp pressed onto paper with a muted low thud and a short descending tone, conveying a gentle no.",
+    "event": "submitInvalid"
+  },
+  {
+    "name": "word-bonus",
+    "seconds": 2,
+    "prompt": "A small celebratory sparkle, like a tiny brass bell struck once followed by a quick upward gliss of a glockenspiel, cheerful bonus reward.",
+    "event": "wordBonus"
+  },
+  {
+    "name": "word-complete",
+    "seconds": 2,
+    "prompt": "A satisfying success chime, like three rising notes played on a marimba with a warm wooden resonance, completing a word puzzle.",
+    "event": "wordComplete"
+  },
+  {
+    "name": "round-complete",
+    "seconds": 3,
+    "prompt": "A short triumphant fanfare, like a small hand bell rung twice followed by a bright rising harp arpeggio, round won celebration.",
+    "event": "roundComplete"
+  },
+  {
+    "name": "round-failed",
+    "seconds": 2,
+    "prompt": "A gentle descending disappointment sound, like three soft low piano notes falling in pitch with a muted wooden knock at the end, round lost but friendly.",
+    "event": "roundFailed"
+  },
+  {
+    "name": "hint-reveal",
+    "seconds": 1,
+    "prompt": "A soft magical reveal shimmer, like a finger circling the rim of a crystal glass with a brief rising glint, a hint appearing.",
+    "event": "hint"
+  },
+  {
+    "name": "undo",
+    "seconds": 1,
+    "prompt": "A quick reverse swoosh, like a sheet of paper being slid back across a wooden table with a soft whoosh, undoing a move.",
+    "event": "undo"
+  }
+]

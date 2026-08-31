@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <link rel="icon" href="./favicon.svg" type="image/svg+xml">
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Letter Pantry</title>
+<link rel="stylesheet" href="./style.css" />
+<script type="module">
+  // The vendored build is an ES module; expose THREE globally for render.mjs,
+  // which no-ops gracefully if this fails.
+  import * as THREE from './vendor/three.module.min.js';
+  globalThis.THREE = THREE;
+</script>
+</head>
+<body class="lp-body">
+<noscript><p id="noscript-msg">Letter Pantry requires JavaScript to run.</p></noscript>
+
+<div id="app" class="lp-app">
+  <canvas id="game-canvas"></canvas>
+  <div id="ui-root"></div>
+</div>
+
+<script type="module">import("./bootstrap.mjs");</script>
+</body>
+</html>
