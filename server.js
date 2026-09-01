@@ -15,7 +15,7 @@ const MAX_BODY = 512 * 1024;
 const MIME = {
   '.html': 'text/html; charset=utf-8',
   '.js': 'application/javascript; charset=utf-8',
-  '.mjs': 'application/javascript; charset=utf-8',
+  '.js': 'application/javascript; charset=utf-8',
   '.css': 'text/css; charset=utf-8',
   '.json': 'application/json; charset=utf-8',
   '.txt': 'text/plain; charset=utf-8',
@@ -28,8 +28,8 @@ const MIME = {
 let rulesMod = null;
 let contentMod = null;
 async function loadModules() {
-  if (!rulesMod) rulesMod = await import('./rules.mjs');
-  if (!contentMod) contentMod = await import('./content.mjs');
+  if (!rulesMod) rulesMod = await import('./rules.js');
+  if (!contentMod) contentMod = await import('./content.js');
   return { rules: rulesMod, content: contentMod };
 }
 

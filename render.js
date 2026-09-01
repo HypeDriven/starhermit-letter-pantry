@@ -2,8 +2,8 @@
 // immutable state snapshots, never mutates rules state. If THREE is missing
 // or WebGL is unavailable, every method no-ops and the DOM UI stays playable.
 
-import { themeById } from './content.mjs';
-import { makeStreams } from './rules.mjs';
+import { themeById } from './content.js';
+import { makeStreams } from './rules.js';
 
 // Named camera framing constants (no magic offsets).
 export const FRAMING = {

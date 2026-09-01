@@ -5,9 +5,9 @@ import { spawn } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import * as rules from '../rules.mjs';
-import * as content from '../content.mjs';
-import { Session } from '../session.mjs';
+import * as rules from '../rules.js';
+import * as content from '../content.js';
+import { Session } from '../session.js';
 
 const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 

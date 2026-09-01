@@ -3,7 +3,7 @@
 // sample loads or if it is missing. Buses: music / effects / ambience.
 // Seeded pitch variants.
 
-import { mulberry32, fnv1a } from './rules.mjs';
+import { mulberry32, fnv1a } from './rules.js';
 
 export class PantryAudio {
   // Event method name -> sfx/<name>.opus basename (see sfx/manifest.json).

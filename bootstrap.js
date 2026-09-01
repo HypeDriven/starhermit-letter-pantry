@@ -2,12 +2,12 @@
 // app state machine, server-time sync, progression & achievements,
 // score submission, and recoverable error handling.
 
-import * as rules from './rules.mjs';
-import * as content from './content.mjs';
-import { Session, loadJSON, saveJSON } from './session.mjs';
-import { createRenderer } from './render.mjs';
-import { UI, loadSettings } from './ui.mjs';
-import { PantryAudio } from './audio.mjs';
+import * as rules from './rules.js';
+import * as content from './content.js';
+import { Session, loadJSON, saveJSON } from './session.js';
+import { createRenderer } from './render.js';
+import { UI, loadSettings } from './ui.js';
+import { PantryAudio } from './audio.js';
 
 const canvas = document.getElementById('game-canvas');
 const uiRoot = document.getElementById('ui-root');

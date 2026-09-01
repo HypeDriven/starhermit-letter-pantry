@@ -2,8 +2,8 @@
 // UI: every game action has a DOM control, full keyboard operation, ARIA live
 // announcements, and persisted accessibility settings.
 
-import { loadJSON, saveJSON } from './session.mjs';
-import { ACHIEVEMENTS, JOURNEY, CHALLENGES, LESSONS, PRACTICE_DIFFICULTIES, THEMES, CONTENT_VERSION } from './content.mjs';
+import { loadJSON, saveJSON } from './session.js';
+import { ACHIEVEMENTS, JOURNEY, CHALLENGES, LESSONS, PRACTICE_DIFFICULTIES, THEMES, CONTENT_VERSION } from './content.js';
 
 export const DEFAULT_SETTINGS = {
   music: 0.6, effects: 0.8, ambience: 0.5,
@@ -20,6 +20,7 @@ export function saveSettings(s) { saveJSON('settings', s); }
 function el(tag, attrs = {}, ...children) {
   const node = document.createElement(tag);
   for (const [k, v] of Object.entries(attrs)) {
+    if (v === null || v === undefined) continue;
     if (k === 'class') node.className = v;
     else if (k === 'text') node.textContent = v;
     else if (k.startsWith('on')) node.addEventListener(k.slice(2), v);

@@ -3,8 +3,8 @@
 // command with an id (idempotent duplicate rejection) and a monotonic
 // elapsedMs, record a replay envelope, and persist versioned snapshots.
 
-import * as rules from './rules.mjs';
-import { CONTENT_VERSION } from './content.mjs';
+import * as rules from './rules.js';
+import { CONTENT_VERSION } from './content.js';
 
 const STORAGE_PREFIX = 'letter-pantry:';
 const SNAPSHOT_VERSION = 1;

@@ -1,8 +1,8 @@
 // Letter Pantry — versioned content: dictionary-driven stage derivation,
 // tutorial lessons, journey stages, daily generator, practice, challenges, themes.
 
-import { WORDS, WORD_SET } from './words.mjs';
-import { fnv1a, mulberry32 } from './rules.mjs';
+import { WORDS, WORD_SET } from './words.js';
+import { fnv1a, mulberry32 } from './rules.js';
 
 export const CONTENT_VERSION = 'content/1';
 

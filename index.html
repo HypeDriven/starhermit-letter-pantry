@@ -7,7 +7,7 @@
 <title>Letter Pantry</title>
 <link rel="stylesheet" href="./style.css" />
 <script type="module">
-  // The vendored build is an ES module; expose THREE globally for render.mjs,
+  // The vendored build is an ES module; expose THREE globally for render.js,
   // which no-ops gracefully if this fails.
   import * as THREE from './vendor/three.module.min.js';
   globalThis.THREE = THREE;
@@ -21,6 +21,6 @@
   <div id="ui-root"></div>
 </div>
 
-<script type="module">import("./bootstrap.mjs");</script>
+<script type="module">import("./bootstrap.js");</script>
 </body>
 </html>
