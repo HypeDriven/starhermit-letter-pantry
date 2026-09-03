@@ -1,4 +1,4 @@
-// Letter Pantry — test suite. Run: node test/run-tests.mjs (no framework).
+// Letter Pantry — test suite. Run: node tests/run-tests.mjs (no framework).
 
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
