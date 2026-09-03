@@ -23,6 +23,7 @@ const app = {
   audio: null,
   ui: null,
   meta: null,          // {mode, modeLabel, descriptor, lesson?, lessonTracker?}
+  hosted: false,       // true only after a validated /api/v1/time probe
   timeOffsetMs: 0,     // serverNow - localNow (round-trip adjusted)
   progression: null,
   tutorial: null,
@@ -70,13 +71,26 @@ async function api(path, options = {}) {
   return body;
 }
 
+// Probe the host's time endpoint ONCE at startup and validate the payload
+// numerically. Only when it yields a finite epoch do we set `hosted`; every
+// other hosted feature is gated on that flag and no-ops locally otherwise —
+// the route is not guaranteed to exist on static hosts, and a failed probe
+// or a non-numeric payload must never produce a NaN clock.
+
 async function syncServerTime() {
   try {
     const t0 = Date.now();
-    const { now } = await api('/api/v1/time');
+    const res = await fetch('/api/v1/time', { cache: 'no-store' });
+    if (!res.ok) throw new Error('no-time');
+    const body = await res.json();
     const t1 = Date.now();
-    app.timeOffsetMs = now - Math.round((t0 + t1) / 2);
+    // Hosts expose the epoch under different keys (`now`, `serverTime`, `epochMs`).
+    const serverMs = Number(body && (body.now ?? body.serverTime ?? body.epochMs));
+    if (!Number.isFinite(serverMs)) throw new Error('no-time');
+    app.timeOffsetMs = serverMs - Math.round((t0 + t1) / 2);
+    app.hosted = true;
   } catch {
+    app.hosted = false;
     app.timeOffsetMs = 0; // offline fallback: local UTC date
   }
 }
@@ -103,10 +117,12 @@ function checkAchievements(context) {
   if (app.stats.targetWordsFound >= 100) unlock('long_term_pantry');
   if (newly.length) {
     saveJSON('achievements', app.achievements);
-    api('/api/v1/achievements', {
-      method: 'POST',
-      body: JSON.stringify({ ids: newly.map((a) => a.id) }),
-    }).catch(() => {}); // offline: local mirror is authoritative enough
+    if (app.hosted) {
+      api('/api/v1/achievements', {
+        method: 'POST',
+        body: JSON.stringify({ ids: newly.map((a) => a.id) }),
+      }).catch(() => {}); // offline: local mirror is authoritative enough
+    }
   }
   return newly;
 }
@@ -213,10 +229,12 @@ async function showResults() {
 
   const newAchievements = checkAchievements({ outcome, descriptor, snapshot: snap });
 
-  // Ranked submission for daily rounds (best-effort).
+  // Ranked submission for daily rounds (best-effort, hosted deployments only).
   let comparison = '';
   if (app.meta.mode === 'daily') {
-    try {
+    if (!app.hosted) {
+      comparison = 'Leaderboard unavailable — score kept locally.';
+    } else try {
       const terminal = session.envelope.terminalResult || { durationMs: snap.elapsedMs };
       await api('/api/v1/score', {
         method: 'POST',
