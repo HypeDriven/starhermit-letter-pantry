@@ -44,6 +44,11 @@ export function loadJSON(key) {
   } catch { return null; }
 }
 
+export function clearJSON(key) {
+  try { localStorage.removeItem(STORAGE_PREFIX + key); return true; }
+  catch { return false; }
+}
+
 // ---------------------------------------------------------------------------
 
 let sessionCounter = 0;
@@ -51,11 +56,13 @@ let sessionCounter = 0;
 export class Session {
   constructor(descriptor, options = {}) {
     this.descriptor = descriptor;
+    this.meta = options.meta || null;
     this.state = rules.createState(descriptor);
     this.sessionId = `s${Date.now().toString(36)}-${++sessionCounter}`;
     this.cmdSeq = 0;
     this.seenCommandIds = new Set();
     this.paused = false;
+    this.pauseReason = null;
     this.accumulatedMs = 0;
     this.lastStamp = nowMs();
     this.listeners = new Set();
@@ -72,7 +79,9 @@ export class Session {
     this._onVisibility = () => {
       if (typeof document === 'undefined') return;
       if (document.hidden) this.pause('tab-hidden');
-      else this.resume('tab-visible');
+      // Returning to the tab must not restart the clock behind an open pause
+      // menu: only an auto-pause is auto-resumed.
+      else if (this.pauseReason === 'tab-hidden') this.resume('tab-visible');
     };
     if (typeof document !== 'undefined' && options.autoPause !== false) {
       document.addEventListener('visibilitychange', this._onVisibility);
@@ -96,6 +105,7 @@ export class Session {
     if (this.paused) return;
     this.accumulatedMs = this.elapsedMs();
     this.paused = true;
+    this.pauseReason = reason;
     this._emit('paused', { reason });
   }
 
@@ -103,6 +113,7 @@ export class Session {
     if (!this.paused) return;
     this.lastStamp = nowMs();
     this.paused = false;
+    this.pauseReason = null;
     this._emit('resumed', { reason });
   }
 
@@ -148,8 +159,12 @@ export class Session {
   }
 
   saveSnapshot() {
+    // A finished round is not resumable: drop the snapshot instead of storing
+    // a dead board that the title screen would offer as "Resume saved round".
+    if (this.state.status === 'terminal') return clearJSON('last-snapshot');
     return saveJSON('last-snapshot', {
       descriptor: this.descriptor,
+      meta: this.meta,
       state: rules.toJSON(this.state),
       envelope: this.envelope,
       sessionId: this.sessionId,
@@ -159,8 +174,9 @@ export class Session {
   static restoreSnapshot() {
     const data = loadJSON('last-snapshot');
     if (!data || !data.descriptor || !data.state) return null;
+    if (data.state.status === 'terminal') { clearJSON('last-snapshot'); return null; }
     try {
-      const session = new Session(data.descriptor, { autoPause: false });
+      const session = new Session(data.descriptor, { autoPause: false, meta: data.meta });
       session.state = rules.fromJSON(data.state);
       session.envelope = data.envelope || session.envelope;
       session.sessionId = data.sessionId || session.sessionId;

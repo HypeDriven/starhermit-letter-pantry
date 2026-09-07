@@ -241,7 +241,9 @@ export function derivePractice(difficulty, seedNum) {
   const pool = JOURNEY_TABLE.filter(([, t]) => t === difficulty).map(([b]) => b);
   const rng = mulberry32(fnv1a('practice:' + difficulty + ':' + seedNum));
   const base = pool[Math.floor(rng() * pool.length)];
-  return buildDescriptor({ id: `practice-${difficulty}-${seedNum}`, seed: 'practice:' + seedNum, base, tier: difficulty });
+  // The seed embeds the difficulty so descriptorFromSeed can reproduce the
+  // exact same tray (the base word pool differs per difficulty).
+  return buildDescriptor({ id: `practice-${difficulty}-${seedNum}`, seed: `practice:${difficulty}:${seedNum}`, base, tier: difficulty });
 }
 
 // ---------------------------------------------------------------------------
@@ -263,14 +265,11 @@ export function descriptorFromSeed(seed) {
     return CHALLENGES.find((c) => c.seed === seed) || null;
   }
   if (seed.startsWith('practice:')) {
-    const n = Number(seed.slice(9));
-    if (!Number.isInteger(n) || n < 0 || n > 1e6) return null;
-    for (const diff of PRACTICE_DIFFICULTIES) {
-      const d = derivePractice(diff, n);
-      if (d.seed === seed) return d;
-    }
-    // practice seeds embed difficulty through the base pick; try all
-    return derivePractice('medium', n);
+    const [difficulty, num] = seed.slice(9).split(':');
+    if (!PRACTICE_DIFFICULTIES.includes(difficulty)) return null;
+    const n = Number(num);
+    if (!Number.isInteger(n) || n < 0 || n > 1e12) return null;
+    return derivePractice(difficulty, n);
   }
   return null;
 }

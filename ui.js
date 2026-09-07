@@ -27,7 +27,14 @@ function el(tag, attrs = {}, ...children) {
     else if (k === 'html') node.innerHTML = v;
     else node.setAttribute(k, v);
   }
-  for (const c of children) if (c) node.append(c);
+  // Children may be nested arrays (e.g. `list.map(...)`); appending an array
+  // directly would stringify it, so flatten before appending.
+  const appendChild = (c) => {
+    if (c === null || c === undefined || c === false) return;
+    if (Array.isArray(c)) { c.forEach(appendChild); return; }
+    node.append(c);
+  };
+  children.forEach(appendChild);
   return node;
 }
 
@@ -99,6 +106,8 @@ export class UI {
 
   _onKey(e) {
     if (this.screen !== 'play' || !this.session) return;
+    // Never hijack browser/OS chords (Ctrl+R reload, Cmd+P print, …).
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
     if (this.overlay) {
       if (e.key === 'Escape') { e.preventDefault(); this.closeOverlay(); }
       return;
@@ -428,9 +437,16 @@ export class UI {
   // Overlays
 
   _openOverlay(name, node) {
+    const returnFocus = this.overlayReturnFocus ||
+      (document.activeElement && document.activeElement !== document.body ? document.activeElement : null);
     this.closeOverlay();
     this.overlay = name;
-    const wrap = el('div', { class: 'lp-overlay', role: 'dialog', 'aria-modal': 'true', id: 'lp-overlay' }, node);
+    this.overlayReturnFocus = returnFocus;
+    const heading = node.querySelector('h2');
+    const wrap = el('div', {
+      class: 'lp-overlay', role: 'dialog', 'aria-modal': 'true', id: 'lp-overlay',
+      'aria-label': heading ? heading.textContent : name,
+    }, node);
     this.root.append(wrap);
     const focusable = node.querySelector('[data-autofocus]') || node.querySelector('button');
     if (focusable) focusable.focus();
@@ -440,6 +456,9 @@ export class UI {
     const o = document.getElementById('lp-overlay');
     if (o) o.remove();
     this.overlay = null;
+    const back = this.overlayReturnFocus;
+    this.overlayReturnFocus = null;
+    if (back && back.isConnected) back.focus();
   }
 
   showPause() {

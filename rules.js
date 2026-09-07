@@ -237,6 +237,15 @@ function snapshotForHistory(state) {
   };
 }
 
+// Undo depth is capped: unbounded history bloats every persisted snapshot
+// (each command rewrites localStorage) without adding usable undo steps.
+const MAX_HISTORY = 200;
+
+function pushHistory(state) {
+  state.history.push(snapshotForHistory(state));
+  if (state.history.length > MAX_HISTORY) state.history.splice(0, state.history.length - MAX_HISTORY);
+}
+
 function restoreFromHistory(state, snap) {
   state.letters = snap.letters.slice();
   state.selected = snap.selected.slice();
@@ -267,6 +276,16 @@ export function applyCommand(state, cmd) {
   const events = [];
   const fail = (reason) => FAIL(reason);
 
+  // Sessions stamp every command with a monotonic elapsedMs; adopt it so the
+  // round clock (and therefore the par-time bonus) reflects real play time.
+  // Replay sees the same stamps, so hashes stay deterministic.
+  if (cmd.type !== 'tick') {
+    const stamp = Number(cmd.elapsedMs);
+    if (Number.isFinite(stamp) && stamp > state.elapsedMs && stamp <= 24 * 3600 * 1000) {
+      state.elapsedMs = Math.floor(stamp);
+    }
+  }
+
   switch (cmd.type) {
     case 'tick': {
       const ms = Number(cmd.elapsedMs);
@@ -280,7 +299,7 @@ export function applyCommand(state, cmd) {
       const i = cmd.index;
       if (!Number.isInteger(i) || i < 0 || i >= state.letters.length) return fail('bad-index');
       if (state.selected.includes(i)) return fail('already-selected');
-      state.history.push(snapshotForHistory(state));
+      pushHistory(state);
       state.selected.push(i);
       events.push({ type: 'select', index: i, letter: state.letters[i], word: currentWord(state) });
       break;
@@ -291,7 +310,7 @@ export function applyCommand(state, cmd) {
       if (!Number.isInteger(i)) return fail('bad-index');
       const pos = state.selected.indexOf(i);
       if (pos === -1) return fail('not-selected');
-      state.history.push(snapshotForHistory(state));
+      pushHistory(state);
       state.selected.splice(pos, 1);
       events.push({ type: 'deselect', index: i, word: currentWord(state) });
       break;
@@ -299,7 +318,7 @@ export function applyCommand(state, cmd) {
 
     case 'clear': {
       if (state.selected.length === 0) return fail('empty-selection');
-      state.history.push(snapshotForHistory(state));
+      pushHistory(state);
       state.selected = [];
       events.push({ type: 'clear' });
       break;
@@ -307,7 +326,7 @@ export function applyCommand(state, cmd) {
 
     case 'shuffle': {
       if (state.mechanics.shuffle === false) return fail('not-allowed');
-      state.history.push(snapshotForHistory(state));
+      pushHistory(state);
       const rng = rngOf(state);
       const letters = state.letters.slice();
       for (let i = letters.length - 1; i > 0; i--) {
@@ -327,7 +346,7 @@ export function applyCommand(state, cmd) {
       const word = currentWord(state);
       if (word.length < 3) return fail('too-short');
       if (state.foundTargets.includes(word) || state.foundBonus.includes(word)) return fail('already-found');
-      state.history.push(snapshotForHistory(state));
+      pushHistory(state);
       state.movesUsed += 1;
       if (state.targets.includes(word)) {
         state.foundTargets.push(word);
@@ -377,7 +396,7 @@ export function applyCommand(state, cmd) {
       if ((state.mechanics.hints || 0) <= state.hintsUsed) return fail('no-hints');
       const unfound = state.targets.filter((w) => !state.foundTargets.includes(w));
       if (unfound.length === 0) return fail('no-hints');
-      state.history.push(snapshotForHistory(state));
+      pushHistory(state);
       const rng = rngOf(state);
       const word = unfound[Math.floor(rng() * unfound.length)];
       const revealed = state.hintReveals[word] || [];

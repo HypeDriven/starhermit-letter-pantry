@@ -15,10 +15,20 @@ const MAX_BODY = 512 * 1024;
 const MIME = {
   '.html': 'text/html; charset=utf-8',
   '.js': 'application/javascript; charset=utf-8',
-  '.js': 'application/javascript; charset=utf-8',
+  '.mjs': 'application/javascript; charset=utf-8',
   '.css': 'text/css; charset=utf-8',
   '.json': 'application/json; charset=utf-8',
   '.txt': 'text/plain; charset=utf-8',
+  '.svg': 'image/svg+xml',
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.webp': 'image/webp',
+  '.ico': 'image/x-icon',
+  '.woff2': 'font/woff2',
+  '.wav': 'audio/wav',
+  '.mp3': 'audio/mpeg',
+  '.ogg': 'audio/ogg',
   '.opus': 'audio/ogg',
 };
 
@@ -188,6 +198,10 @@ const server = http.createServer(async (req, res) => {
     let rel = pathname === '/' ? '/index.html' : pathname;
     const filePath = path.normalize(path.join(ROOT, rel));
     if (!filePath.startsWith(ROOT + path.sep) && filePath !== ROOT) {
+      return sendError(res, 403, 'forbidden');
+    }
+    // Server-side stores are reachable only through the API, never as files.
+    if (filePath === DATA_DIR || filePath.startsWith(DATA_DIR + path.sep)) {
       return sendError(res, 403, 'forbidden');
     }
     fs.readFile(filePath, (err, data) => {

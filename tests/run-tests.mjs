@@ -233,6 +233,47 @@ await test('rules: fuzz malformed commands — no throws, no hangs', () => {
   assert.ok(Number.isFinite(state.score.total));
 });
 
+await test('rules: command stamps drive the round clock and par-time bonus', () => {
+  const d = content.JOURNEY[0];
+  const state = rules.createState(d);
+  assert.equal(state.elapsedMs, 0);
+  // Stamps advance the clock monotonically; a stale stamp never rewinds it.
+  rules.applyCommand(state, { type: 'select', index: 0, elapsedMs: 4000 });
+  assert.equal(state.elapsedMs, 4000);
+  rules.applyCommand(state, { type: 'deselect', index: 0, elapsedMs: 1000 });
+  assert.equal(state.elapsedMs, 4000);
+
+  // A slow completion earns a smaller time bonus than a fast one.
+  const solve = (ms) => {
+    const s = rules.createState(d);
+    for (const t of d.targets) for (const c of selectWord(s, t)) rules.applyCommand(s, Object.assign({ elapsedMs: ms }, c));
+    assert.equal(s.terminalReason, 'completed');
+    return s.score;
+  };
+  const fast = solve(10000);
+  const slow = solve(d.par.timeMs - 5000);
+  assert.equal(fast.time, Math.round((d.par.timeMs - 10000) / 1000) * 5);
+  assert.equal(slow.time, 25);
+  assert.ok(fast.total > slow.total, 'beating par time must pay more');
+  // Past par there is no time bonus, and never a negative one.
+  assert.equal(solve(d.par.timeMs + 60000).time, 0);
+});
+
+await test('content: practice seeds round-trip through descriptorFromSeed', () => {
+  for (const diff of content.PRACTICE_DIFFICULTIES) {
+    for (const n of [0, 7, Math.floor(Date.now() / 60000)]) {
+      const d = content.derivePractice(diff, n);
+      const back = content.descriptorFromSeed(d.seed);
+      assert.ok(back, `no descriptor for ${d.seed}`);
+      assert.equal(back.id, d.id);
+      assert.equal(back.letters, d.letters);
+      assert.deepEqual(back.targets, d.targets);
+    }
+  }
+  assert.equal(content.descriptorFromSeed('practice:nope:1'), null);
+  assert.equal(content.descriptorFromSeed('practice:easy:x'), null);
+});
+
 await test('content: validator passes all authored stages and sample dailies', () => {
   const r = content.validateContent();
   assert.ok(r.ok, r.errors.join('\n'));

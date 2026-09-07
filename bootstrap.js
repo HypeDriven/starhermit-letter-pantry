@@ -30,6 +30,7 @@ const app = {
   stats: null,
   achievements: null,
   roundCompletions: 0, // streak tracking
+  prepareTimer: null,  // pending countdown → startRound timeout
 };
 
 function setState(next, reason) {
@@ -132,7 +133,7 @@ function checkAchievements(context) {
 
 function startRound(descriptor, meta) {
   if (app.session) app.session.dispose();
-  const session = new Session(descriptor);
+  const session = new Session(descriptor, { meta });
   app.session = session;
   app.meta = meta;
   if (meta.lesson) {
@@ -274,6 +275,7 @@ async function showResults() {
 }
 
 function leaveRound(destination) {
+  cancelPrepare();
   if (app.session) {
     app.session.saveSnapshot();
     app.session.dispose();
@@ -297,9 +299,18 @@ function showTitle() {
 // Countdown / preparing
 
 function prepareRound(descriptor, meta) {
+  cancelPrepare();
   setState('preparing', meta.mode);
   app.ui.showPreparing(meta.modeLabel, 3);
-  setTimeout(() => startRound(descriptor, meta), 3200);
+  app.prepareTimer = setTimeout(() => {
+    app.prepareTimer = null;
+    startRound(descriptor, meta);
+  }, 3200);
+}
+
+// A pending countdown must never drop the player into a round they left.
+function cancelPrepare() {
+  if (app.prepareTimer) { clearTimeout(app.prepareTimer); app.prepareTimer = null; }
 }
 
 // ---------------------------------------------------------------------------
@@ -337,12 +348,19 @@ const handlers = {
     const session = Session.restoreSnapshot();
     if (!session) { showTitle(); return; }
     app.session = session;
-    app.meta = { mode: 'resumed', modeLabel: 'Resumed round', descriptor: session.descriptor, lesson: null };
+    const stage = content.JOURNEY.find(d => d.id === session.descriptor.id);
+    app.meta = session.meta || {
+      mode: stage ? 'journey' : 'resumed',
+      modeLabel: stage ? `Journey stage ${stage.index + 1} — ${stage.tier}` : 'Resumed round',
+      descriptor: session.descriptor, lesson: null,
+    };
+    session.meta = app.meta;
     session.onEvent((kind, data) => {
       if (kind === 'command') {
         app.renderer.onCommandEvents(data.events, data.state);
         app.ui.updatePlay(data.state, session.actions());
         handleAudioEvents(data.events);
+        handleLessonProgress(data.command);
         if (data.state.status === 'terminal') {
           setState('resolving', 'terminal');
           setTimeout(() => showResults(), 900);
@@ -392,6 +410,9 @@ function detectWebGL() {
 async function boot() {
   // Global recoverable error handler.
   window.addEventListener('error', (e) => {
+    // Ignore resource-load failures (an audio clip, an image): only script
+    // errors should eject the player from a live round.
+    if (e.target && e.target !== window) return;
     console.error(e.error || e.message);
     if (app.ui && app.state !== 'boot') {
       app.ui.showError('A recoverable error occurred. Your round state is saved.', () => {
