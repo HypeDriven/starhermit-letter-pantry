@@ -490,6 +490,11 @@ export class UI {
     ];
     const node = el('main', { class: 'lp-panel lp-results', role: 'main' },
       el('h2', { text: headline, 'data-autofocus': '', tabindex: '-1' }),
+      outcome === 'completed' ? el('img', {
+        class: 'lp-results-art', src: './assets/results-tray.webp', alt: '',
+        role: 'presentation', decoding: 'async', loading: 'lazy',
+        onerror: (e) => { e.target.remove(); },
+      }) : null,
       el('table', { class: 'lp-score-table' },
         el('caption', { text: 'Score breakdown' }),
         el('tbody', {},
@@ -586,6 +591,7 @@ export class UI {
     this.timerId = setInterval(() => {
       if (n <= 0) { this._stopTimer(); return; }
       cd.textContent = String(n);
+      this.h.onCountdownTick && this.h.onCountdownTick();
       this.announce(String(n));
       n--;
     }, 1000);

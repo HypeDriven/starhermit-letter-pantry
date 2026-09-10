@@ -18,13 +18,18 @@
 .lp-body {
   margin: 0;
   font-family: Georgia, 'Times New Roman', serif;
-  background: var(--lp-bg);
+  /* Key art doubles as the backdrop when the 3D canvas is unavailable. */
+  background: var(--lp-bg) url('./assets/title-backdrop.webp') center / cover no-repeat;
   color: var(--lp-text);
   overflow: hidden;
   font-size: calc(16px * var(--lp-font-scale));
 }
 
 body.lp-larger-text { --lp-font-scale: 1.2; }
+
+/* High contrast drops photographic backdrops entirely. */
+body.lp-high-contrast, body.lp-high-contrast .lp-title { background-image: none; }
+body.lp-high-contrast .lp-results-art { display: none; }
 
 body.lp-high-contrast {
   --lp-bg: #000;
@@ -118,7 +123,14 @@ body.lp-reduced-motion * { transition: none !important; animation: none !importa
 
 /* ------------------------------------------------------------------ title */
 
-.lp-title { text-align: center; }
+.lp-title {
+  text-align: center;
+  background-image:
+    linear-gradient(rgba(30, 20, 12, 0.88), rgba(24, 16, 10, 0.95)),
+    url('./assets/title-backdrop.webp');
+  background-size: cover;
+  background-position: center 40%;
+}
 .lp-title-nav { display: flex; flex-direction: column; gap: 0.6em; margin-top: 1.2em; }
 
 /* ------------------------------------------------------------------ modes */
@@ -264,6 +276,15 @@ body.lp-high-contrast .lp-letter { background: #fff; color: #000; border-color: 
 /* ------------------------------------------------------------------ results */
 
 .lp-results { min-width: min(480px, 90vw); }
+.lp-results-art {
+  display: block;
+  width: min(320px, 70%);
+  margin: 0.4em auto 0.9em;
+  border-radius: 12px;
+  border: 2px solid var(--lp-accent-dark);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
+}
+@media (max-height: 620px) { .lp-results-art { display: none; } }
 .lp-score-table { width: 100%; border-collapse: collapse; margin: 0.8em 0; }
 .lp-score-table th, .lp-score-table td { padding: 0.3em 0.5em; text-align: left; }
 .lp-score-table td { text-align: right; font-variant-numeric: tabular-nums; }

@@ -1,18 +1,22 @@
 # SFX manifest — letter-pantry
 
 Generated with MOSS-SoundEffect v2.0, 48 kHz mono Opus (96 kbps VBR, loudness-normalized; 100 inference steps).
+Canonical source: `sfx/manifest.txt`. Generator entries: `sfx/manifest.json`.
 
-| file | event | prompt |
-|---|---|---|
-| tile-select.opus | select | A single small wooden letter tile picked up and tapped onto a wooden board, short soft knock with a light fingertip click. |
-| tile-deselect.opus | deselect | A small wooden letter tile set back down gently on a felt-lined tray, soft muted wooden tap, quieter and lower than a pick-up. |
-| tray-clear.opus | clear | Several small wooden letter tiles swept off a board in one quick sliding motion, a brief clatter of wood pieces sliding together. |
-| tray-shuffle.opus | shuffle | A handful of wooden letter tiles being shaken and shuffled around inside a small wooden tray, rattling clicks and knocks. |
-| ui-click.opus | uiClick | A crisp, subtle UI button click, like a small plastic switch being pressed once, short and clean. |
-| submit-invalid.opus | submitInvalid | A dull rejected buzz, like a rubber stamp pressed onto paper with a muted low thud and a short descending tone, conveying a gentle no. |
-| word-bonus.opus | wordBonus | A small celebratory sparkle, like a tiny brass bell struck once followed by a quick upward gliss of a glockenspiel, cheerful bonus reward. |
-| word-complete.opus | wordComplete | A satisfying success chime, like three rising notes played on a marimba with a warm wooden resonance, completing a word puzzle. |
-| round-complete.opus | roundComplete | A short triumphant fanfare, like a small hand bell rung twice followed by a bright rising harp arpeggio, round won celebration. |
-| round-failed.opus | roundFailed | A gentle descending disappointment sound, like three soft low piano notes falling in pitch with a muted wooden knock at the end, round lost but friendly. |
-| hint-reveal.opus | hint | A soft magical reveal shimmer, like a finger circling the rim of a crystal glass with a brief rising glint, a hint appearing. |
-| undo.opus | undo | A quick reverse swoosh, like a sheet of paper being slid back across a wooden table with a soft whoosh, undoing a move. |
+| file | event | description | usage context |
+|---|---|---|---|
+| tile-select.opus | select | A single small wooden letter tile picked up and tapped onto a wooden board: short soft knock with a light fingertip click. | Fires on the `select` rules event when a letter biscuit is picked, whether by tap, click or Enter on a focused letter button. |
+| tile-deselect.opus | deselect | A small wooden letter tile set back down gently on a felt-lined tray: soft muted wooden tap, quieter and lower than the pick-up. | Fires on the `deselect` rules event — tapping a selected biscuit again, or Backspace popping the last letter. |
+| tray-clear.opus | clear | Several small wooden letter tiles swept off a board in one sliding motion: a brief clatter of wood pieces sliding together. | Fires on the `clear` rules event — the Clear button or the Escape key emptying the whole hand. |
+| tray-shuffle.opus | shuffle | A handful of wooden letter tiles shaken and shuffled inside a small wooden tray: rattling clicks and knocks. | Fires on the `shuffle` rules event when the tray is re-ordered; also captioned "Tray shuffled." into the polite live region. |
+| ui-click.opus | uiClick | A crisp, subtle UI button click, like a small plastic switch pressed once: short and clean. | Delegated click cue for every menu/chrome button in `#ui-root` (title, mode select, journey, settings, pause, results). Letter biscuits and the five round-action buttons are excluded — they carry their own event sounds. |
+| submit-invalid.opus | submitInvalid | A dull rejected buzz, like a rubber stamp on paper with a muted low thud and a short descending tone: a gentle "no". | Fires on the `word-invalid` rules event: a submitted word that is neither a target nor a bonus word. Costs 25 points and breaks the streak; captioned "Not a valid word." |
+| word-bonus.opus | wordBonus | A small celebratory sparkle: a tiny brass bell struck once, then a quick upward glockenspiel gliss. | Fires on the `word-bonus` rules event — a dictionary word formable from the tray that is not on the target list. |
+| word-complete.opus | wordComplete | A satisfying success chime: three rising marimba notes with a warm wooden resonance. | Fires on the `word-target` rules event — a target word filled in, the game's primary reward beat. |
+| round-complete.opus | roundComplete | A short triumphant fanfare: a small hand bell rung twice, then a bright rising harp arpeggio. | Fires on the `terminal` rules event with reason `completed` (every target word found), just before the results screen. |
+| round-failed.opus | roundFailed | A gentle descending disappointment: three soft low piano notes falling in pitch with a muted wooden knock at the end. | Fires on the `terminal` rules event with reason `out-of-moves` or `resigned`. Deliberately friendly, never punitive. |
+| hint-reveal.opus | hint | A soft magical reveal shimmer: a finger circling a crystal glass rim with a brief rising glint. | Fires on the `hint` rules event when the Hint button or H reveals one letter of an unfound target slot. |
+| undo.opus | undo | A quick reverse swoosh, like a sheet of paper slid back across a wooden table. | Fires on the `undo` rules event (Undo button or U), when the previous snapshot is restored. |
+| round-start.opus | roundStart | A wooden tray of biscuits set down firmly on a kitchen counter: one solid low thud, then a brief settling rattle of small pieces. | Played once by bootstrap.js when a round begins, immediately after the play HUD is mounted and the countdown ends. Marks the transition preparing -> active. |
+| achievement-unlock.opus | achievement | A warm reward flourish: a struck brass hand bell, a rising three-note celesta figure, and a gentle shimmer tail. | Played 700 ms into the results screen when `checkAchievements` returns at least one newly unlocked achievement, layered after the round-complete cue. Captioned "Achievement unlocked." |
+| countdown-tick.opus | countdownTick | A single dry wooden metronome tick: one short hollow knock of wood on wood, almost no tail. | Played once per second on the preparing screen's 3-2-1 countdown, in sync with the number announced to the live region. |

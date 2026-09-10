@@ -155,6 +155,7 @@ function startRound(descriptor, meta) {
   app.renderer.setTheme(descriptor.theme);
   app.renderer.update(session.snapshot());
   app.ui.showPlay(session, meta);
+  app.audio.roundStart();
   session.resume('round-start');
   setState('active', meta.mode + ':' + descriptor.id);
 }
@@ -229,6 +230,7 @@ async function showResults() {
   saveJSON('progression', app.progression);
 
   const newAchievements = checkAchievements({ outcome, descriptor, snapshot: snap });
+  if (newAchievements.length) setTimeout(() => app.audio.achievement(), 700);
 
   // Ranked submission for daily rounds (best-effort, hosted deployments only).
   let comparison = '';
@@ -392,6 +394,7 @@ const handlers = {
   },
   onThemeChange(themeId) { app.renderer.setTheme(themeId); },
   onCameraReset() { app.renderer.resetCamera(); },
+  onCountdownTick() { app.audio.countdownTick(); },
   onPaused() { setState('paused', 'user'); },
   getProgression() { return app.progression; },
   getTutorial() { return app.tutorial; },
@@ -458,6 +461,14 @@ async function boot() {
     app.ui.showCompatNotice(app.renderer.reason || 'webgl');
     canvas.style.display = 'none';
   }
+
+  // Menu/chrome buttons get the generic click cue. Letters and the round
+  // action buttons already emit their own event-specific sound.
+  uiRoot.addEventListener('click', (e) => {
+    const btn = e.target && e.target.closest && e.target.closest('button');
+    if (!btn || btn.classList.contains('lp-letter') || btn.closest('.lp-actions')) return;
+    app.audio.uiClick();
+  });
 
   window.addEventListener('resize', () => app.renderer.resize());
   window.addEventListener('orientationchange', () => setTimeout(() => app.renderer.resize(), 60));

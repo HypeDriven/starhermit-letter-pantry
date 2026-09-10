@@ -70,5 +70,23 @@
     "seconds": 1,
     "prompt": "A quick reverse swoosh, like a sheet of paper being slid back across a wooden table with a soft whoosh, undoing a move.",
     "event": "undo"
+  },
+  {
+    "name": "round-start",
+    "seconds": 2,
+    "prompt": "A wooden tray of biscuits being set down firmly on a kitchen counter, one solid low wooden thud followed by a brief settling rattle of small pieces, warm and inviting, the start of a round.",
+    "event": "roundStart"
+  },
+  {
+    "name": "achievement-unlock",
+    "seconds": 3,
+    "prompt": "A warm reward flourish, a single struck brass hand bell ringing out followed by a soft rising three note celesta figure and a gentle shimmer tail, an award being granted.",
+    "event": "achievement"
+  },
+  {
+    "name": "countdown-tick",
+    "seconds": 1,
+    "prompt": "A single dry wooden metronome tick, one short hollow knock of wood on wood with almost no tail, a countdown beat.",
+    "event": "countdownTick"
   }
 ]

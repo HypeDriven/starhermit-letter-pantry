@@ -20,6 +20,9 @@ export class PantryAudio {
     roundFailed: 'round-failed',
     hint: 'hint-reveal',
     undo: 'undo',
+    roundStart: 'round-start',
+    achievement: 'achievement-unlock',
+    countdownTick: 'countdown-tick',
   };
 
   constructor(options = {}) {
@@ -185,6 +188,19 @@ export class PantryAudio {
     this._playSample('hint', () => this._blip('effects', { freq: 880, dur: 0.16, gain: 0.14, slide: 220 }));
     this._say('Hint revealed.');
   }
+  roundStart() {
+    this._playSample('roundStart', () => {
+      this._thock(150, 0.2, 0.28);
+      setTimeout(() => this._blip('effects', { freq: 300, dur: 0.07, gain: 0.1 }), 90);
+    });
+  }
+  achievement() {
+    this._playSample('achievement', () => {
+      [659, 880, 1319].forEach((f, i) => setTimeout(() => this._blip('effects', { freq: f, dur: 0.3, gain: 0.2 }), i * 130));
+    });
+    this._say('Achievement unlocked.');
+  }
+  countdownTick() { this._playSample('countdownTick', () => this._thock(320, 0.06, 0.16)); }
   undo() { this._playSample('undo', () => this._blip('effects', { freq: 380, dur: 0.08, gain: 0.14, slide: 140 })); }
 
   // Ambience: quiet filtered noise loop -------------------------------------
