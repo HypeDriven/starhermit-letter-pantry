@@ -339,8 +339,14 @@ body.lp-high-contrast .lp-letter { background: #fff; color: #000; border-color: 
 }
 
 @media (max-width: 900px) and (orientation: landscape) {
-  .lp-play { grid-template-columns: minmax(150px, 190px) 1fr minmax(140px, 180px); gap: 0.4em; }
+  .lp-play { grid-template-columns: minmax(150px, 190px) 1fr minmax(150px, 190px); gap: 0.4em; }
   .lp-rail { font-size: 0.82em; padding: 0.5em; }
+  /* the action rail is bounded by the viewport height and scrolls inside
+     itself; buttons keep full 44px targets in two columns */
+  .lp-rail-right { align-self: stretch; max-height: calc(100dvh - 1.2em - var(--lp-safe-top) - var(--lp-safe-bottom)); overflow-y: auto; }
+  .lp-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 0.35em; }
+  .lp-actions .lp-btn { min-height: 44px; padding: 0.3em 0.4em; font-size: 0.95em; }
+  .lp-status { font-size: 0.9em; }
   .lp-letter { width: 48px; height: 48px; font-size: 1.4em; }
   .lp-current { font-size: 1.5em; }
   .lp-btn { padding: 0.35em 0.8em; }
