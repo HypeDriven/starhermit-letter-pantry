@@ -24,7 +24,8 @@ hiding in that tray has been served.
 | File | Responsibility |
 |---|---|
 | `index.html` | Shell: canvas `#game-canvas`, `#ui-root`, ES-module bootstrap, `THREE` global bridge |
-| `bootstrap.js` | App state machine, module wiring, server-time probe, progression, achievements, score submission, error recovery |
+| `bootstrap.js` | App state machine, module wiring, server-time probe (dev backend), progression, achievements, score submission, cloud-sync hooks, error recovery |
+| `platform.js` | StarHermit platform adapter: launch token (fragment, Bearer, 45-min refresh), profile/nickname, cloud save (zip+base64, debounced), read-only leaderboard |
 | `rules.js` | Pure deterministic rules engine: RNG, commands, scoring, undo, serialization, replay. No DOM, no timers |
 | `content.js` | Versioned content: dictionary-derived stages, lessons, journey table, challenges, daily generator, themes, achievements, offline validator |
 | `session.js` | Session orchestration: command ids, monotonic clock, replay envelope, checksummed `localStorage` |
@@ -32,12 +33,12 @@ hiding in that tray has been served.
 | `render.js` | Three.js presentation layer; no-ops entirely if WebGL or `THREE` is absent |
 | `audio.js` | WebAudio: sample one-shots from `sfx/`, synth fallbacks, three buses, adaptive music bed |
 | `words.js` | The shipped dictionary (`WORDS`, `WORD_SET`) |
-| `server.js` | StarHermit authoritative script: static hosting + `/api/v1/*` (time, daily, score, leaderboard, achievements) |
+| `server.js` | Local dev backend (static hosting + `/api/v1/*`: time, daily, score, leaderboard, achievements); plain Node script, not a platform game script |
 | `style.css` | Layout, palette, responsive breakpoints, accessibility classes |
 | `assets/` | `title-backdrop.webp`, `results-tray.webp` |
 | `sfx/` | 15 Opus clips + `manifest.txt` (canonical), `manifest.md`, `manifest.json` |
 | `data/` | Server-side stores (`leaderboard.json`, `achievements.json`); gitignored, API-only |
-| `tests/` | `run-tests.mjs` (15 unit/integration tests), `e2e.mjs` (Playwright playthrough) |
+| `tests/` | `run-tests.mjs` (18 unit/integration tests), `e2e.mjs` (Playwright playthrough) |
 | `coverart.png` | 1200×675 store key art |
 
 ---
@@ -211,7 +212,8 @@ the `/api/v1/time` probe when hosted, local clock otherwise. Published seeds are
 **Unlocks and achievements.** Five achievements (`content.ACHIEVEMENTS`): `first_completion`,
 `mechanic_mastery` (all lessons), `streak_3` (three completions without a resignation),
 `hard_milestone` (a hard Journey stage), `long_term_pantry` (100 cumulative target words).
-Unlocks are mirrored locally and POSTed idempotently to `/api/v1/achievements` when hosted.
+Unlocks are local — part of the cloud-saved progress doc — and additionally POSTed
+idempotently to the dev backend's `/api/v1/achievements` when no launch token is present.
 
 ---
 
@@ -441,24 +443,29 @@ The remaining work is tracked in §17.
 ## 12. StarHermit integration
 
 Manifest (`starhermit.txt`): `name=Letter Pantry`, `launch=index.html`, `owner=<uuid>`,
-`server=server.js`, `cover=coverart.png`. Conventions per <https://wiki.starhermit.com/>.
+`server=server.js`, `cover=cover.jpg`. Conventions per <https://wiki.starhermit.com/>.
 
-**Used.**
+**Used (on-platform, launch token present).**
 
 | Feature | How |
 |---|---|
-| Server script | `server.js` is the authoritative script: it serves the game statically and owns `/api/v1/*` |
-| Platform time | `GET /api/v1/time` is probed once at boot, round-trip corrected into `timeOffsetMs`; a finite epoch is the sole gate for `app.hosted`. It fixes the UTC date for the Daily |
-| Daily content | `GET /api/v1/daily?date=` returns seed, ruleset, content version, target and letter counts, derived by the same `deriveDaily` the client runs |
-| Leaderboards | `POST /api/v1/score` **replays the whole command log server-side** and rejects stale ruleset/content version, unknown seeds, replay failure, score mismatch, or a duration inconsistent with the replay. `GET /api/v1/leaderboard?board=daily&seed=` returns the top 50. Boards keep 100 entries, sorted score desc → duration asc → timestamp asc |
-| Achievements | `GET/POST /api/v1/achievements`, idempotent and validated against `content.ACHIEVEMENTS`; the client keeps a local mirror |
-| Sessions | Every round produces a replay envelope (schema version, build version, content version, seed, initial hash, stamped commands, hash chain, terminal result) — the payload the score endpoint verifies |
+| Launch token | `#game_token=` fragment read once at boot and stripped via `history.replaceState`; JWT `sub`/`game_scope` decoded (slug never hard-coded); `Authorization: Bearer` on every platform call; re-mint every 45 min via `POST /api/v1/games/{slug}/launch-token` (60 s retry on failure) |
+| Profile | `GET /api/v1/users/{sub}/profile` → nickname (fallback `"Player " + id.slice(0,8)`) shown on the title screen and in the play HUD; `/api/v1/me` is never called and usernames are never displayed |
+| Cloud save | `PUT/GET /api/v1/me/cloud-saves/{slug}` — one zip+base64 slot (`save.json` via the stored-zip helper in `platform.js`); remote-preferred load, 2 s debounce + `pagehide`/`visibilitychange` flush, sync status next to the player name; localStorage stays the offline cache |
+| Leaderboards | Read-only: `GET /api/v1/games/{slug}` → `leaderboardId`, then `GET /api/v1/leaderboards/{leaderboardId}/entries?friendsOnly=&page=&pageSize=` with userIds resolved to nicknames via the profile helper; without a `leaderboardId` only local records show. Daily personal bests live locally (in the cloud-saved doc) |
+| Achievements | Local only (part of the cloud-saved progress doc); `server.js` is not a Jint game script, so there is no script-owned unlock path |
 
-**Not used.** No identity or account UI (submissions default to `guest`); no presence, party,
-chat, matchmaking, real-time multiplayer or cloud save — progression, settings and the resumable
-round live in `localStorage`. Everything hosted is best-effort: with the probe failed the game
-runs identically, the Daily uses the local UTC date, and results say "Leaderboard unavailable —
-score kept locally."
+**Used (dev backend, no launch token).** When served by its own `server.js`, the game probes
+`GET /api/v1/time` once; a finite epoch gates `app.hosted` and enables the replay-validated
+ranked daily: `POST /api/v1/score` revalidates the command log server-side, and
+`GET /api/v1/leaderboard?board=daily&seed=` returns the seed-filtered top 50. Achievements
+mirror idempotently via `GET/POST /api/v1/achievements`.
+
+**Not used.** No presence, party, chat, matchmaking or real-time multiplayer; clients can
+never submit scores to a platform leaderboard (script/elo-owned, read-only by design). With
+no launch token and no dev backend the game runs identically: the Daily uses the local UTC
+date, progression stays in `localStorage`, and results say "Leaderboard unavailable — score
+kept locally."
 
 ---
 
@@ -477,7 +484,10 @@ a command list, `replay()` reproduces the exact state and hash chain — asserte
 **Persistence** (`session.js`). Keys are prefixed `letter-pantry:`; every record is
 `{v, checksum, body}` with an FNV-1a checksum, so a corrupted or downgraded record reads as
 `null` instead of crashing. Keys: `settings`, `progression`, `tutorial`, `stats`, `achievements`,
-`last-snapshot`. A terminal round *clears* `last-snapshot` rather than saving a dead board.
+`boards` (daily personal bests by seed), `last-snapshot`. A terminal round *clears*
+`last-snapshot` rather than saving a dead board. On-platform, `platform.js` mirrors the five
+progress keys (`progression`, `tutorial`, `stats`, `achievements`, `boards`) into the cloud
+slot, remote-wins on load; localStorage remains the authoritative offline cache.
 Storage failure (private mode) is caught and the game continues unsaved.
 
 **Clock.** `Session.elapsedMs()` accumulates `performance.now()` deltas across pauses; every
@@ -508,14 +518,16 @@ fails the run.
 
 ## 14. Testing and acceptance criteria
 
-**`npm test` → `tests/run-tests.mjs`, 15 tests, no framework.** It verifies: the three terminal
+**`npm test` → `tests/run-tests.mjs`, 18 tests, no framework.** It verifies: the three terminal
 states; undo and hint semantics; serialization round-trip and the v0→v1 migration; deterministic
 replay across many seeds (property loop); a malformed-command fuzz that must neither throw nor
 hang; that command stamps drive the round clock and par-time bonus; that practice seeds
 round-trip through `descriptorFromSeed`; that `validateContent()` passes every authored stage and
 a sample of dailies; idempotent duplicate-command rejection; envelope hashes and terminal result;
-client/server daily parity; that score validation accepts a valid replay and rejects a tampered
-one; and that the server blocks path traversal and 404s as JSON.
+platform adapter behavior (cloud zip round-trips and is structurally valid, JWT `sub`/`game_scope`
+decode, Bearer on every call, token re-mint swap, nickname + `Player `+id8 fallback, no-token
+inertness); client/server daily parity; that score validation accepts a valid replay and rejects a
+tampered one; and that the server blocks path traversal and 404s as JSON.
 
 **`npm run test:e2e` → `tests/e2e.mjs`**, both viewports, 13 steps: title renders its four named
 buttons; settings open, reduced motion reaches `<body>`, the music slider responds to a real key
@@ -573,9 +585,11 @@ cheaper and sharper as procedural geometry driven by the theme palette.
 ## 16. Known limitations
 
 1. **English only.** No i18n layer at all (§10).
-2. **No identity.** Daily submissions are posted as `guest`, so the leaderboard cannot
-   distinguish players or show a personal history; "friends" is accepted as a query parameter but
-   filters nothing.
+2. **No identity on the dev leaderboard.** Submissions to the local `server.js` board are
+   posted as `guest`, so it cannot distinguish players; "friends" is accepted as a query
+   parameter but filters nothing. On-platform the board is read-only, identity comes from the
+   launch token (nickname shown, progress cloud-saved), and client score submission is
+   impossible by design.
 3. **Practice seeds churn by the minute.** `derivePractice` is seeded on
    `floor(serverNow / 60000)`, so *Retry* within the same minute repeats the same tray while a
    retry across a minute boundary silently changes it.
@@ -600,7 +614,6 @@ cheaper and sharper as procedural geometry driven by the theme palette.
   number and date formatting, and per-locale dictionaries carried by a bumped `CONTENT_VERSION`
   so server-side replay stays exact.
 - **Bonus-word review on the results screen**, listing found and missed bonus words.
-- **Player identity on the daily board** via StarHermit accounts, replacing the `guest` name.
 - **A stable practice seed per retry**, so *Retry* is a genuine retry of the same tray.
 - **Direct interaction with the 3D biscuits** (raycast pick and drag-to-spell) as an addition to,
   never a replacement for, the DOM controls.

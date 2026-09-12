@@ -8,6 +8,7 @@ import { Session, loadJSON, saveJSON } from './session.js';
 import { createRenderer } from './render.js';
 import { UI, loadSettings } from './ui.js';
 import { PantryAudio } from './audio.js';
+import { platform } from './platform.js';
 
 const canvas = document.getElementById('game-canvas');
 const uiRoot = document.getElementById('ui-root');
@@ -23,15 +24,36 @@ const app = {
   audio: null,
   ui: null,
   meta: null,          // {mode, modeLabel, descriptor, lesson?, lessonTracker?}
-  hosted: false,       // true only after a validated /api/v1/time probe
+  hosted: false,       // true only after a validated /api/v1/time probe against
+                       // the game's OWN server.js (local dev backend); platform
+                       // hosting is tracked separately by `platform.active`
   timeOffsetMs: 0,     // serverNow - localNow (round-trip adjusted)
   progression: null,
   tutorial: null,
   stats: null,
   achievements: null,
+  boards: null,        // personal bests: {daily: {seed: {score, durationMs, date}}}
   roundCompletions: 0, // streak tracking
   prepareTimer: null,  // pending countdown → startRound timeout
 };
+
+// Persistent keys are written through here so the cloud mirror is notified;
+// localStorage remains the authoritative offline cache.
+function persist(key, value) {
+  saveJSON(key, value);
+  platform.markDirty();
+}
+
+function syncStatusText() {
+  if (!platform.active) return '';
+  const name = platform.playerName || 'Player ' + (platform.sub || '?').slice(0, 8);
+  const sync = { saving: 'syncing…', synced: 'synced', offline: 'sync unavailable — local save' }[platform.syncStatus] || '';
+  return sync ? `${name} · ${sync}` : name;
+}
+
+function updatePlayerStatus() {
+  if (app.ui) app.ui.setPlayerStatus(syncStatusText());
+}
 
 function setState(next, reason) {
   const prev = app.state;
@@ -54,6 +76,9 @@ function loadStats() {
 function loadAchievements() {
   return Object.assign({ unlocked: [] }, loadJSON('achievements') || {});
 }
+function loadBoards() {
+  return Object.assign({ daily: {} }, loadJSON('boards') || {});
+}
 
 // ---------------------------------------------------------------------------
 // Server integration (recoverable when absent: file:// or static hosting).
@@ -72,13 +97,19 @@ async function api(path, options = {}) {
   return body;
 }
 
-// Probe the host's time endpoint ONCE at startup and validate the payload
-// numerically. Only when it yields a finite epoch do we set `hosted`; every
-// other hosted feature is gated on that flag and no-ops locally otherwise —
-// the route is not guaranteed to exist on static hosts, and a failed probe
-// or a non-numeric payload must never produce a NaN clock.
+// Probe the game's OWN server.js time endpoint ONCE at startup and validate
+// the payload numerically. Only when it yields a finite epoch do we set
+// `hosted` (the local-dev backend with replay-validated score submission);
+// every other hosted feature is gated on that flag and no-ops locally
+// otherwise. On the StarHermit platform (`platform.active`) this probe is
+// skipped: /api/v1/time is not a platform route and must not 404 there.
 
 async function syncServerTime() {
+  if (platform.active) {
+    app.hosted = false;
+    app.timeOffsetMs = 0; // platform: local clock drives the UTC date
+    return;
+  }
   try {
     const t0 = Date.now();
     const res = await fetch('/api/v1/time', { cache: 'no-store' });
@@ -99,7 +130,9 @@ async function syncServerTime() {
 function serverNowMs() { return Date.now() + app.timeOffsetMs; }
 
 // ---------------------------------------------------------------------------
-// Achievements — local mirror + best-effort server unlock (idempotent).
+// Achievements — local, part of the cloud-saved progress doc. On the game's
+// own server.js (local dev backend) unlocks are additionally mirrored via an
+// idempotent POST; the platform has no client-authoritative unlock path.
 
 function checkAchievements(context) {
   const { outcome, descriptor, snapshot } = context;
@@ -117,8 +150,8 @@ function checkAchievements(context) {
   if (outcome === 'completed' && descriptor.tier === 'hard' && descriptor.id.startsWith('journey')) unlock('hard_milestone');
   if (app.stats.targetWordsFound >= 100) unlock('long_term_pantry');
   if (newly.length) {
-    saveJSON('achievements', app.achievements);
-    if (app.hosted) {
+    persist('achievements', app.achievements);
+    if (app.hosted && !platform.active) {
       api('/api/v1/achievements', {
         method: 'POST',
         body: JSON.stringify({ ids: newly.map((a) => a.id) }),
@@ -195,7 +228,7 @@ function handleLessonProgress(command) {
       tracker.done = true;
       if (!app.tutorial.completedLessons.includes(lesson.id)) {
         app.tutorial.completedLessons.push(lesson.id);
-        saveJSON('tutorial', app.tutorial);
+        persist('tutorial', app.tutorial);
       }
       app.ui.announce('Lesson complete!', true);
     } else {
@@ -226,17 +259,44 @@ async function showResults() {
   } else {
     app.stats.completionStreak = 0;
   }
-  saveJSON('stats', app.stats);
-  saveJSON('progression', app.progression);
+  persist('stats', app.stats);
+  persist('progression', app.progression);
 
   const newAchievements = checkAchievements({ outcome, descriptor, snapshot: snap });
   if (newAchievements.length) setTimeout(() => app.audio.achievement(), 700);
 
-  // Ranked submission for daily rounds (best-effort, hosted deployments only).
+  // Daily rounds: personal best is always kept locally (and cloud-mirrored);
+  // the board comparison depends on the environment.
   let comparison = '';
   if (app.meta.mode === 'daily') {
-    if (!app.hosted) {
-      comparison = 'Leaderboard unavailable — score kept locally.';
+    const prev = app.boards.daily[descriptor.seed];
+    const isBest = !prev || snap.score.total > prev.score;
+    if (isBest) {
+      app.boards.daily[descriptor.seed] = {
+        score: snap.score.total,
+        durationMs: snap.elapsedMs,
+        date: content.todayISO(serverNowMs()),
+      };
+      persist('boards', app.boards);
+    }
+    const best = app.boards.daily[descriptor.seed];
+    const bestText = `Your best today: ${best.score}.`;
+
+    if (platform.active) {
+      // Read-only platform board; clients can never submit scores.
+      try {
+        const board = await platform.fetchLeaderboard();
+        if (board && board.entries && board.entries.length) {
+          const top = board.entries[0];
+          comparison = `Daily board: top ${top.name} ${top.score} (${board.entries.length} shown). ${bestText}`;
+        } else {
+          comparison = `Global board unavailable — score kept locally. ${bestText}`;
+        }
+      } catch {
+        comparison = `Leaderboard unavailable — score kept locally. ${bestText}`;
+      }
+    } else if (!app.hosted) {
+      comparison = 'Leaderboard unavailable — score kept locally. ' + bestText;
     } else try {
       const terminal = session.envelope.terminalResult || { durationMs: snap.elapsedMs };
       await api('/api/v1/score', {
@@ -260,7 +320,7 @@ async function showResults() {
         : 'Daily board: you are the first entry today.';
       if (rank === 0) comparison = 'Top of the daily board!';
     } catch (err) {
-      comparison = 'Leaderboard unavailable — score kept locally.';
+      comparison = 'Leaderboard unavailable — score kept locally. ' + bestText;
     }
   }
 
@@ -425,13 +485,22 @@ async function boot() {
     }
   });
 
+  // Platform launch token first: when hosted, the cloud save is the
+  // remote-preferred source for every persistent key, so merge it into the
+  // localStorage cache before the in-memory copies load.
+  const platformActive = platform.init();
+  if (platformActive) await platform.loadCloud();
+
   app.progression = loadProgression();
   app.tutorial = loadTutorial();
   app.stats = loadStats();
   app.achievements = loadAchievements();
+  app.boards = loadBoards();
 
   const settings = loadSettings();
   app.ui = new UI(uiRoot, handlers);
+  platform.onStatus = () => updatePlayerStatus();
+  updatePlayerStatus();
   app.audio = new PantryAudio({
     seed: 'session',
     caption: (text) => app.ui.announce(text),
@@ -473,11 +542,23 @@ async function boot() {
   window.addEventListener('resize', () => app.renderer.resize());
   window.addEventListener('orientationchange', () => setTimeout(() => app.renderer.resize(), 60));
 
+  // Cloud-save flush: debounced writes are topped up by a flush when the
+  // page hides or the tab backgrounds, so a closing tab never loses progress.
+  window.addEventListener('pagehide', () => platform.flushSave());
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) platform.flushSave();
+  });
+
   // Content sanity check (dev aid; cheap).
   const validation = content.validateContent();
   if (!validation.ok) console.warn('content validation issues:', validation.errors);
 
   await syncServerTime();
+  if (platformActive) {
+    // Nickname from the platform profile (never /api/v1/me, never usernames);
+    // the fallback name is already in place from init().
+    platform.loadOwnProfile().then(() => updatePlayerStatus()).catch(() => {});
+  }
   setState('title', 'boot-complete');
   showTitle();
 }

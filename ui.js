@@ -56,6 +56,7 @@ export class UI {
     this.screen = null;
     this.overlay = null;
     this.timerId = null;
+    this.playerStatus = ''; // platform profile name + cloud sync status
     this.applySettingsClasses();
 
     root.innerHTML = '';
@@ -70,6 +71,16 @@ export class UI {
     const region = assertive ? this.liveAssert : this.livePolite;
     region.textContent = '';
     requestAnimationFrame(() => { region.textContent = msg; });
+  }
+
+  // Platform profile name + sync status, shown on the title screen and in the
+  // play HUD; empty string means offline/local (no slot is rendered).
+  setPlayerStatus(text) {
+    this.playerStatus = text || '';
+    for (const id of ['lp-player-status', 'lp-sync-status']) {
+      const node = document.getElementById(id);
+      if (node) node.textContent = this.playerStatus;
+    }
   }
 
   applySettingsClasses() {
@@ -170,6 +181,7 @@ export class UI {
         el('button', { class: 'lp-btn', onclick: () => this.showHelp() }, 'How to play'),
         el('button', { class: 'lp-btn', onclick: () => this.showSettings() }, 'Settings'),
       ),
+      this.playerStatus ? el('p', { class: 'lp-player-status', id: 'lp-player-status', text: this.playerStatus }) : null,
       el('p', { class: 'lp-version', text: `Content ${CONTENT_VERSION}` }),
     );
     this._setScreen('title', node);
@@ -282,6 +294,7 @@ export class UI {
         el('p', { class: 'lp-score' }, 'Score: ', el('strong', { id: 'lp-score', text: '0' })),
         el('p', { class: 'lp-moves', id: 'lp-moves' }),
         el('p', { class: 'lp-time', id: 'lp-time' }),
+        this.playerStatus ? el('p', { class: 'lp-player-status', id: 'lp-sync-status', text: this.playerStatus }) : null,
       ),
       el('div', { class: 'lp-actions', role: 'group', 'aria-label': 'Round actions' },
         this._actionBtn('Submit', 'submit', () => this.command({ type: 'submit' }), 'lp-btn-primary'),

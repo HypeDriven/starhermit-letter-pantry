@@ -8,6 +8,9 @@ import { fileURLToPath } from 'node:url';
 import * as rules from '../rules.js';
 import * as content from '../content.js';
 import { Session } from '../session.js';
+import {
+  zipStore, unzipFirstEntry, bytesToBase64, base64ToBytes, decodeJwtPayload, createPlatform,
+} from '../platform.js';
 
 const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 
@@ -312,6 +315,74 @@ await test('session: envelope records hashes and terminal result', () => {
   assert.equal(session.envelope.stateHashes.length, session.envelope.commands.length + 1);
   assert.ok(session.verifyReplay().ok);
   session.dispose();
+});
+
+// ---------------------------------------------------------------------------
+// Platform adapter
+
+await test('platform: cloud zip is a valid stored zip and round-trips', () => {
+  const doc = { schemaVersion: 1, savedAt: 1726000000000, stats: { roundsCompleted: 3 } };
+  const payload = new TextEncoder().encode(JSON.stringify(doc));
+  const zip = zipStore('save.json', payload);
+  // Local file header + EOCD signatures.
+  assert.equal(zip[0], 0x50); assert.equal(zip[1], 0x4b); assert.equal(zip[2], 0x03); assert.equal(zip[3], 0x04);
+  const eocd = zip.length - 22;
+  assert.equal(zip[eocd], 0x50); assert.equal(zip[eocd + 1], 0x4b); assert.equal(zip[eocd + 2], 0x05); assert.equal(zip[eocd + 3], 0x06);
+  // base64 survives the PUT/GET body encoding.
+  const back = base64ToBytes(bytesToBase64(zip));
+  assert.deepEqual(back, zip);
+  const decoded = JSON.parse(new TextDecoder().decode(unzipFirstEntry(back)));
+  assert.deepEqual(decoded, doc);
+});
+
+await test('platform: JWT payload decodes sub + game_scope; garbage is null', () => {
+  const b64url = (o) => bytesToBase64(new TextEncoder().encode(JSON.stringify(o)))
+    .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  const token = `e30.${b64url({ sub: 'user-1234', game_scope: 'letter-pantry', exp: 1726000000 })}.sig`;
+  const claims = decodeJwtPayload(token);
+  assert.equal(claims.sub, 'user-1234');
+  assert.equal(claims.game_scope, 'letter-pantry');
+  assert.equal(decodeJwtPayload('not-a-jwt'), null);
+  assert.equal(decodeJwtPayload('a.b!'), null);
+});
+
+await test('platform: no-token instance is inert; Bearer + refresh + fallback name', async () => {
+  // Offline instance: nothing platform-side may fire.
+  const offline = createPlatform();
+  assert.equal(offline.active, false);
+  assert.equal(await offline.loadCloud(), false);
+  assert.equal(await offline.fetchLeaderboard(), null);
+  assert.equal(await offline.resolveName('abcdefgh'), 'Player abcdefgh');
+  offline.markDirty();
+  offline.flushSave();
+
+  // Hosted instance against a stubbed fetch.
+  const calls = [];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url, options = {}) => {
+    calls.push({ url: String(url), headers: options.headers || {} });
+    if (String(url).endsWith('/launch-token')) return { ok: true, json: async () => ({ token: 'new-token' }) };
+    if (String(url).includes('/users/u1/profile')) return { ok: true, json: async () => ({ id: 'u1', username: 'secretname', nickname: 'Baker Bo' }) };
+    if (String(url).includes('/profile')) return { ok: true, json: async () => ({ id: 'other-id-xyz', username: 'othername', nickname: null }) };
+    return { ok: true, json: async () => ({}) };
+  };
+  try {
+    const p = createPlatform();
+    p.active = true; p.token = 'old-token'; p.sub = 'u1'; p.slug = 'letter-pantry';
+    await p.api('/api/v1/anything', { method: 'POST', body: '{}' });
+    assert.equal(calls[0].headers.authorization, 'Bearer old-token');
+    assert.equal(calls[0].headers['content-type'], 'application/json');
+
+    await p.refreshToken();
+    assert.equal(p.token, 'new-token');
+
+    assert.equal(await p.loadOwnProfile(), 'Baker Bo');
+    assert.equal(await p.resolveName('u1'), 'Baker Bo');
+    assert.equal(await p.resolveName('other-id-xyz'), 'Player other-id');
+    assert.ok(!calls.some((c) => c.url.includes('/api/v1/me')), '/api/v1/me must never be called');
+  } finally {
+    globalThis.fetch = realFetch;
+  }
 });
 
 // ---------------------------------------------------------------------------
