@@ -23,14 +23,17 @@ hiding in that tray has been served.
 
 | File | Responsibility |
 |---|---|
-| `index.html` | Shell: canvas `#game-canvas`, `#ui-root`, ES-module bootstrap, `THREE` global bridge |
+| `index.html` | Shell: canvas `#game-canvas`, `#ui-root`, import map (`three`, `three/addons/`), ES-module bootstrap, `THREE` global bridge |
 | `bootstrap.js` | App state machine, module wiring, server-time probe (dev backend), progression, achievements, score submission, cloud-sync hooks, error recovery |
 | `platform.js` | StarHermit platform adapter: launch token (fragment, Bearer, 45-min refresh), profile/nickname, cloud save (zip+base64, debounced), read-only leaderboard |
 | `rules.js` | Pure deterministic rules engine: RNG, commands, scoring, undo, serialization, replay. No DOM, no timers |
 | `content.js` | Versioned content: dictionary-derived stages, lessons, journey table, challenges, daily generator, themes, achievements, offline validator |
 | `session.js` | Session orchestration: command ids, monotonic clock, replay envelope, checksummed `localStorage` |
-| `ui.js` | Every screen, overlay, control and ARIA live region; settings persistence |
-| `render.js` | Three.js presentation layer; no-ops entirely if WebGL or `THREE` is absent |
+| `ui.js` | Every screen, overlay, control and ARIA live region; settings persistence, including the Graphics section |
+| `render.js` | Three.js presentation layer: pantry scene, biscuits, particles, lighting, lazily loaded post-processing, adaptive resolution; applies graphics settings live; no-ops entirely if WebGL or `THREE` is absent |
+| `gfx.js` | Pure graphics quality model: presets, per-category tiers, GPU detection, `resolve()`, `choosePreset()`, `presetTier()`, `describe()` |
+| `gfx-i18n.js` | Graphics-section strings in the nine product locales, picked from `navigator.language` |
+| `vendor/` | `three.module.min.js` (r170) and `three/addons/` (r170 post-processing passes, shaders, `RoomEnvironment`) |
 | `audio.js` | WebAudio: sample one-shots from `sfx/`, synth fallbacks, three buses, adaptive music bed |
 | `words.js` | The shipped dictionary (`WORDS`, `WORD_SET`) |
 | `server.js` | Local dev backend (static hosting + `/api/v1/*`: time, daily, score, leaderboard, achievements); plain Node script, not a platform game script |
@@ -38,7 +41,7 @@ hiding in that tray has been served.
 | `assets/` | `title-backdrop.webp`, `results-tray.webp` |
 | `sfx/` | 15 Opus clips + `manifest.txt` (canonical), `manifest.md`, `manifest.json` |
 | `data/` | Server-side stores (`leaderboard.json`, `achievements.json`); gitignored, API-only |
-| `tests/` | `run-tests.mjs` (18 unit/integration tests), `e2e.mjs` (Playwright playthrough) |
+| `tests/` | `run-tests.mjs` (22 unit/integration tests), `e2e.mjs` (Playwright playthrough) |
 | `coverart.png` | 1200×675 store key art |
 
 ---
@@ -320,17 +323,54 @@ tabular numerals in the score table.
 **Motion.** The selection lift settles exponentially (`dt × 14`), frame-rate independent. Idle
 biscuits breathe ±0.02 units. Camera "kick" is a decaying offset from a fixed base pose (0.12 on
 a target, 0.05 on a bonus, 0.2 on completion) — never a cumulative lerp, so the camera cannot
-drift. Particles are one pooled non-raycastable `Points` cloud, capped per tier (0/300/800).
+drift. Celebration sparks are one pooled non-raycastable additive `Points` cloud, capped by the
+*particles* tier (off 0 / low 300 / high 800); a second cloud of dust motes (60 / 160) drifts
+through the room when ambient motion is on.
 
 **Hero of the screen.** The tray: bottom-centre, largest type on screen above it (the 2em
 current word), and the only thing that lifts and glows.
 
-**Reduced motion** (`settings.reducedMotion`) disables idle bob, particle bursts and camera kick
-in `render.js`, and `body.lp-reduced-motion *` kills every CSS transition and animation. Event
+**Reduced motion** (`settings.reducedMotion`) disables idle bob, particle bursts, camera kick,
+dust drift and the bulb shimmer in `render.js` (the OS `prefers-reduced-motion` also stills the
+ambient animation), and `body.lp-reduced-motion *` kills every CSS transition and animation. Event
 *timing* is untouched: the same cues fire, they just do not move.
 
-**Quality tiers** (`QUALITY_TIERS`): low = no shadows, DPR 1, 0.85 render scale, no particles;
-medium = shadows, DPR ≤1.5, 300 particles; high = DPR ≤2, 800 particles.
+**Graphics.** The scene is a pantry corner: a board wall, a counter with the biscuit tray, and
+two shelves of jars (glass shells over coloured contents, metal lids, paper labels) and tins.
+Biscuits in the tray mirror the DOM tray letter-for-letter, lean back so their faces read from
+the camera, and lift, glow and ring when picked; on the title screen they spell PANTRY. The camera
+pulls back whenever the biscuits would not fit the visible width (portrait phones, side rails on
+wide screens). Lighting is ACES filmic tone mapping with sRGB output: a warm key light with PCF
+soft shadows whose frustum is fitted to the tray, counter and jar shelf, a hemisphere fill and a
+warm pantry bulb that shimmers gently. Optional effects: key-light shadows, image-based
+reflections (`PMREMGenerator` + `RoomEnvironment` as `scene.environment`, intensity 0.3), surface
+detail (procedural wood-grain and board textures with bump, speckled biscuit dough with a
+debossed letter, toasted rims, docking holes and a light clearcoat), GTAO ambient occlusion, bloom
+limited to highlights (threshold 0.9: the selection glow and sparks), a colour grade (S-curve,
+slight saturation, warm highlights) with vignette, FXAA/SMAA/MSAA anti-aliasing, spark and dust
+particles, and ambient motion (idle bob, dust drift, bulb shimmer). The Settings screen's
+**Graphics** section offers a quality preset (Auto, chosen from the detected GPU — software
+renderers get Low, discrete GPUs and Apple M-series get High, others Balanced, touch-first devices
+at most Balanced; Low; Balanced; High; Ultra), a render scale (50–200% of the preset's), a
+per-effect override for each of shadows, ambient occlusion, bloom, colour grade, anti-aliasing,
+reflections, surface detail, particles and ambient motion ("From preset (…)" by default; choosing
+a preset clears overrides), adaptive resolution (steps the resolution down to 60% when frames
+average over 26 ms and back up under 14 ms), a frame-rate readout (bottom-left, non-interactive)
+and a summary line "GPU · cost · W×H px". Pixel ratio is `min(devicePixelRatio, cap)` × preset scale ×
+render scale × adaptive scale, with caps Low 1, Balanced 1.5, High/Ultra 2. Changes apply
+immediately without reload and persist in `settings.gfx`; the chosen preset is mirrored to
+`data-gfx-preset` on `<body>` and the canvas. The post chain (EffectComposer → RenderPass → GTAO →
+UnrealBloom → grade → OutputPass → SMAA/FXAA) is loaded lazily from `vendor/three/addons/` and
+only runs when a post effect is on, so Low (no shadows, plain surfaces, no post, no particles,
+DPR 1 × 0.85) is cheaper than the previous default. If the post chain cannot load or build, the
+scene renders without it and the Graphics section says so.
+
+| Preset | Shadows | AO | Bloom | Grade | AA | Reflections | Detail | Particles | Motion | Scale |
+|---|---|---|---|---|---|---|---|---|---|---|
+| Low | off | off | off | off | MSAA | off | plain | off | static | 0.85 |
+| Balanced | 1024² | off | on | on | FXAA | on | detailed | low | animated | 1 |
+| High | 2048² | on | on | on | SMAA | on | detailed | high | animated | 1 |
+| Ultra | 4096² | high | on | on | MSAA | on | detailed | high | animated | 1.25 |
 
 **Visual assets the design calls for:** the pantry-shelf key art used as the title-panel backdrop
 and as the page backdrop when WebGL is unavailable; a filled-tray illustration for a successful
@@ -396,7 +436,8 @@ TP=−2), 100 inference steps.
 
 The product requires en-US, en-GB, es-419, es-ES, de-DE, fr-FR, fr-CA, pt-BR and it-IT.
 
-**Today:** the game ships **en-US only**. `index.html` declares `lang="en"`; every interface
+**Today:** the game ships **en-US only**, except the Graphics settings section, whose strings
+(`gfx-i18n.js`) exist in all nine locales and follow `navigator.language`. `index.html` declares `lang="en"`; every interface
 string is an inline literal in `ui.js`, `content.js` (achievement and lesson copy) and
 `bootstrap.js`; there is no string catalogue, no locale detection, and no `Intl` formatting.
 
@@ -434,7 +475,7 @@ The remaining work is tracked in §17.
 - **Reduced motion** per §8, preserving event timing. **Target sizes:** every button ≥44×44 CSS
   px, biscuits 64/56/48 px with a 10 px gap.
 - **Other options.** Larger text (1.2×), CVD-safe palette, left-handed rail swap, haptics off,
-  tutorial-prompt replay, three volume sliders, three graphics tiers — all persisted through
+  tutorial-prompt replay, three volume sliders, the Graphics section (§8) — all persisted through
   checksummed `localStorage`.
 - **No audio-only gameplay.** Every sound has a caption or an equivalent visual state.
 
@@ -502,7 +543,8 @@ fixed-size buffer with `setDrawRange`. Every mesh, material, geometry and textur
 
 **Failure handling.** `webglcontextlost` is prevented, announced, and the scene rebuilt from the
 last snapshot on restore. Missing `THREE`/WebGL yields a null renderer, a `.lp-compat` notice and
-a hidden canvas. The global `error` handler ignores resource-load failures (a 404 audio clip must
+a hidden canvas. Missing or failing post-processing addons fall back to direct rendering with a
+note in the Graphics section and no console output. The global `error` handler ignores resource-load failures (a 404 audio clip must
 not eject a player mid-round) and offers a recoverable error screen for script errors, saving the
 round first.
 
@@ -511,14 +553,14 @@ ephemeral port (the repo's `server.js` is the platform script, not a dev server)
 headless Chrome via `playwright-core`, clicking only visible controls — buttons by accessible
 name, `.lp-letter` biscuits by index, real key presses. It imports `JOURNEY` solely to know
 *which* biscuits to click, and runs twice: 1280×800, then a fresh 390×844 touch context. Any
-console error or `pageerror` that is not documented GPU noise or the expected `/api/v1/time` 404
+console error, warning or `pageerror` that is not documented GPU noise or the expected `/api/v1/time` 404
 fails the run.
 
 ---
 
 ## 14. Testing and acceptance criteria
 
-**`npm test` → `tests/run-tests.mjs`, 18 tests, no framework.** It verifies: the three terminal
+**`npm test` → `tests/run-tests.mjs`, 22 tests, no framework.** It verifies: the three terminal
 states; undo and hint semantics; serialization round-trip and the v0→v1 migration; deterministic
 replay across many seeds (property loop); a malformed-command fuzz that must neither throw nor
 hang; that command stamps drive the round clock and par-time bonus; that practice seeds
@@ -527,11 +569,18 @@ a sample of dailies; idempotent duplicate-command rejection; envelope hashes and
 platform adapter behavior (cloud zip round-trips and is structurally valid, JWT `sub`/`game_scope`
 decode, Bearer on every call, token re-mint swap, nickname + `Player `+id8 fallback, no-token
 inertness); client/server daily parity; that score validation accepts a valid replay and rejects a
-tampered one; and that the server blocks path traversal and 404s as JSON.
+tampered one; that the server blocks path traversal and 404s as JSON; and the graphics model —
+`detectPreset` on sample GPU strings (software → Low, discrete/Apple M → High, touch capped at
+Balanced), `resolve()` with presets, overrides, invalid values and the 50–200% scale clamp,
+`choosePreset()` clearing overrides, and Graphics strings present in all nine locales.
 
-**`npm run test:e2e` → `tests/e2e.mjs`**, both viewports, 13 steps: title renders its four named
+**`npm run test:e2e` → `tests/e2e.mjs`**, both viewports, 14 steps: title renders its four named
 buttons; settings open, reduced motion reaches `<body>`, the music slider responds to a real key
-press, the quality select has exactly 3 options and the theme row is populated; help opens and
+press and the theme row is populated; in the Graphics section Auto reads "detected: Low" on the
+software GPU, Ultra applies (4096² shadows in the summary) without console noise, Low then High
+set `data-gfx-preset`, a shadows override shows "no shadows" in the summary, the render-scale
+slider answers a key press, the frame-rate readout appears, the section fits the viewport, and
+preset + override + toggle survive a reload, after which choosing Auto clears the override; help opens and
 closes; mode select shows 5 cards with Practice/Challenge/Learn rendering ≥3/4/3 clickable
 buttons; the Journey list shows 42 stages with exactly 1 unlocked; the countdown leads to a HUD
 with the right biscuit count and all five action buttons; a click selects and Escape clears; Hint
@@ -548,8 +597,8 @@ snapshot lingers; Next stage starts stage 2; pause → leave returns to a title 
    disabled until the word is long enough, and *How to play* states the scoring formula. ✔
 2. Every implemented feature is reachable in the browser through visible controls — all five
    modes, all five themes, every setting, pause, resume, retry, next stage. ✔
-3. No console errors or warnings during a full playthrough at either viewport; the e2e fails on
-   any that are not documented GPU noise. ✔
+3. No console errors or warnings during a full playthrough at either viewport, including with the
+   Ultra preset; the e2e fails on any that are not documented GPU noise. ✔
 4. No text or control is cut off at 1280×800 or 390×844: panels scroll internally within
    `100dvh`, rails cap at 34dvh in portrait, safe-area insets pad every edge. ✔
 5. Features that could use StarHermit do: time, daily, score validation, leaderboard,
@@ -574,7 +623,8 @@ snapshot lingers; Next stage starts stage 2; pause → leave returns to a title 
 | `sfx/manifest.json` | Generator entries (name, seconds, prompt, event) for all 15 clips | authored | shipped |
 | `sfx/manifest.md` | Human-readable mirror of `manifest.txt` | generated from `manifest.txt` | shipped |
 | Music bed, ambience | Adaptive arpeggio and room tone | procedural, `audio.js` | shipped — deliberately not sampled |
-| 3D pantry, tray, biscuits, jars | The whole scene | procedural Three.js geometry, `render.js` | shipped — no external models; letter faces are canvas textures |
+| 3D pantry, tray, biscuits, jars | The whole scene | procedural Three.js geometry, `render.js` | shipped — no external models; letter faces, wood grain, boards and dough are procedural canvas textures |
+| `vendor/three/addons/` | Post-processing passes, shaders, `RoomEnvironment` | three.js r170 `examples/jsm`, same revision as `vendor/three.module.min.js` | shipped |
 | `words.js` | Dictionary | authored | shipped |
 
 No 3D model files and no character animations: the game has no humanoid, and every prop is
@@ -584,7 +634,7 @@ cheaper and sharper as procedural geometry driven by the theme palette.
 
 ## 16. Known limitations
 
-1. **English only.** No i18n layer at all (§10).
+1. **English only.** No i18n layer beyond the Graphics section's string table (§10).
 2. **No identity on the dev leaderboard.** Submissions to the local `server.js` board are
    posted as `guest`, so it cannot distinguish players; "friends" is accepted as a query
    parameter but filters nothing. On-platform the board is read-only, identity comes from the

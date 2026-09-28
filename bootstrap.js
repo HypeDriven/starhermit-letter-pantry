@@ -449,11 +449,12 @@ const handlers = {
     app.audio.setVolume('music', settings.music);
     app.audio.setVolume('effects', settings.effects);
     app.audio.setVolume('ambience', settings.ambience);
-    app.renderer.setQuality(settings.graphics);
+    app.renderer.setGraphics(settings.gfx);
     app.renderer.setReducedMotion(settings.reducedMotion);
   },
   onThemeChange(themeId) { app.renderer.setTheme(themeId); },
   onCameraReset() { app.renderer.resetCamera(); },
+  getGraphicsInfo() { return app.renderer ? app.renderer.graphicsInfo() : null; },
   onCountdownTick() { app.audio.countdownTick(); },
   onPaused() { setState('paused', 'user'); },
   getProgression() { return app.progression; },
@@ -516,7 +517,7 @@ async function boot() {
 
   const webglOk = detectWebGL() && !!globalThis.THREE;
   app.renderer = createRenderer(canvas, {
-    quality: settings.graphics,
+    graphics: settings.gfx,
     reducedMotion: settings.reducedMotion,
     onContextLost: () => {
       app.ui.announce('Graphics context lost — restoring…', true);

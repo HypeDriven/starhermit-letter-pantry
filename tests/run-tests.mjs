@@ -11,6 +11,8 @@ import { Session } from '../session.js';
 import {
   zipStore, unzipFirstEntry, bytesToBase64, base64ToBytes, decodeJwtPayload, createPlatform,
 } from '../platform.js';
+import * as gfx from '../gfx.js';
+import { GFX_STRINGS, pickLocale, gfxT } from '../gfx-i18n.js';
 
 const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 
@@ -491,6 +493,65 @@ await test('server: path traversal blocked, JSON 404s', async () => {
     assert.equal(res3.status, 404);
     assert.deepEqual(Object.keys(await res3.json()), ['error']);
   } finally { proc.kill(); }
+});
+
+await test('gfx: detectPreset maps GPU strings to tiers; touch caps at balanced', () => {
+  assert.equal(gfx.detectPreset('ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero)), SwiftShader driver)'), 'low');
+  assert.equal(gfx.detectPreset('llvmpipe (LLVM 15.0.7, 256 bits)'), 'low');
+  assert.equal(gfx.detectPreset('ANGLE (NVIDIA, NVIDIA GeForce RTX 3070 Direct3D11 vs_5_0 ps_5_0)'), 'high');
+  assert.equal(gfx.detectPreset('Apple M2'), 'high');
+  assert.equal(gfx.detectPreset('ANGLE (Intel, Intel(R) UHD Graphics 620 Direct3D11)'), 'balanced');
+  assert.equal(gfx.detectPreset('Adreno (TM) 740'), 'balanced');
+  assert.equal(gfx.detectPreset(''), 'balanced');
+  assert.equal(gfx.detectPreset('Apple M2', { mobile: true }), 'balanced');
+  assert.equal(gfx.detectPreset('SwiftShader', { mobile: true }), 'low');
+});
+
+await test('gfx: resolve applies preset, overrides, scale clamp and post flag', () => {
+  const auto = gfx.resolve({}, 'low');
+  assert.equal(auto.preset, 'low');
+  assert.equal(auto.auto, true);
+  assert.equal(auto.shadows, 'off');
+  assert.equal(auto.post, false, 'Low renders without a post chain');
+  assert.equal(auto.adaptive, true);
+  assert.equal(auto.showFps, false);
+  const high = gfx.resolve({ preset: 'high', shadows: 'off', bloom: 'bogus', render_scale: 9 }, 'low');
+  assert.equal(high.preset, 'high');
+  assert.equal(high.auto, false);
+  assert.equal(high.shadows, 'off', 'override wins');
+  assert.equal(high.bloom, gfx.presetTier('high', 'bloom'), 'invalid override falls back to preset');
+  assert.equal(high.renderScale, 2, 'render scale clamps to 200%');
+  assert.equal(high.post, true);
+  assert.equal(gfx.resolve({ render_scale: 0.1 }, 'balanced').renderScale, 0.5);
+  assert.equal(gfx.resolve({ preset: 'nope' }, undefined).preset, 'balanced');
+  for (const p of gfx.PRESETS) {
+    const r = gfx.resolve({ preset: p });
+    for (const [cat, tiers] of Object.entries(gfx.CATEGORIES)) assert.ok(tiers.includes(r[cat]), `${p}.${cat}`);
+  }
+  assert.match(gfx.describe(high, [1280, 800]), /no shadows .* 1280×800 px$/);
+});
+
+await test('gfx: choosing a preset clears overrides but keeps scale/toggles', () => {
+  const saved = { preset: 'high', shadows: 'off', ao: 'high', render_scale: 1.5, adaptive: false, show_fps: true };
+  const next = gfx.choosePreset(saved, 'low');
+  assert.deepEqual(next, { preset: 'low', render_scale: 1.5, adaptive: false, show_fps: true });
+  assert.equal(gfx.choosePreset(saved, 'auto').preset, 'auto');
+  assert.equal(gfx.resolve(next, 'high').shadows, 'off');
+  assert.equal(gfx.resolve(gfx.choosePreset(saved, 'ultra'), 'low').ao, 'high');
+});
+
+await test('gfx: Graphics strings exist in every required locale', () => {
+  const locales = ['en-US', 'en-GB', 'es-419', 'es-ES', 'de-DE', 'fr-FR', 'fr-CA', 'pt-BR', 'it-IT'];
+  const keys = Object.keys(GFX_STRINGS['en-US']);
+  for (const l of locales) {
+    assert.ok(GFX_STRINGS[l], l);
+    for (const k of keys) assert.ok(GFX_STRINGS[l][k], `${l}.${k}`);
+  }
+  assert.equal(pickLocale('de'), 'de-DE');
+  assert.equal(pickLocale('es-MX'), 'es-419');
+  assert.equal(pickLocale('fr-CA'), 'fr-CA');
+  assert.equal(pickLocale('ja-JP'), 'en-US');
+  assert.equal(gfxT('en-US', 'auto', { tier: 'Low' }), 'Auto (detected: Low)');
 });
 
 // ---------------------------------------------------------------------------

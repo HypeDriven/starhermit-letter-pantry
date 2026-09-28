@@ -97,7 +97,7 @@ async function playthrough(label, viewport, hasTouch) {
   const errors = [];
   page.on('pageerror', (e) => errors.push(`pageerror: ${e.message}`));
   page.on('console', (m) => {
-    if (m.type() !== 'error' || browserNoise.test(m.text())) return;
+    if ((m.type() !== 'error' && m.type() !== 'warning') || browserNoise.test(m.text())) return;
     // Expected offline probe: bootstrap.js intentionally fetches /api/v1/time
     // once to detect hosting; the embedded static server 404s it and the game
     // deliberately falls back to local (unhosted) mode.
@@ -137,12 +137,62 @@ async function playthrough(label, viewport, hasTouch) {
       const before = await music.inputValue();
       await music.press('ArrowLeft');
       if ((await music.inputValue()) === before) throw new Error('music slider did not respond');
-      const optionCount = await page.getByLabel('Quality tier').locator('option').count();
-      if (optionCount !== 3) throw new Error(`quality tier select has ${optionCount} options, expected 3`);
-      await page.getByLabel('Quality tier').selectOption('low');
       const themes = await page.locator('.lp-settings fieldset:last-of-type .lp-row button').count();
       if (themes < 2) throw new Error(`theme picker rendered ${themes} buttons`);
       await shot('settings');
+      await page.locator('.lp-settings .lp-back').click();
+      await page.waitForSelector('.lp-title');
+    });
+
+    await step('settings → Graphics: presets, override, summary, persistence', async () => {
+      await page.getByRole('button', { name: 'Settings' }).click();
+      await page.waitForSelector('[data-gfx-section]');
+      const preset = page.locator('#gfx-preset');
+      await preset.scrollIntoViewIfNeeded();
+      if ((await preset.locator('option').count()) !== 5) throw new Error('quality select should offer Auto + 4 presets');
+      if (!/^Auto \(detected: Low\)$/.test((await preset.locator('option').first().textContent()).trim())) {
+        throw new Error('software GPU should auto-detect Low');
+      }
+      const bodyPreset = () => page.evaluate(() => document.body.dataset.gfxPreset);
+      const summary = () => page.textContent('#gfx-summary');
+      if ((await bodyPreset()) !== 'low') throw new Error('auto preset not applied: ' + (await bodyPreset()));
+      // Ultra renders the full post chain; it must not produce console noise.
+      await preset.selectOption('ultra');
+      await page.waitForFunction(() => document.body.dataset.gfxPreset === 'ultra');
+      await page.waitForTimeout(1200);
+      if (!/4096² shadows/.test(await summary())) throw new Error('ultra summary: ' + (await summary()));
+      await preset.selectOption('low');
+      await preset.selectOption('high');
+      await page.waitForFunction(() => document.body.dataset.gfxPreset === 'high');
+      const shadows = page.locator('#gfx-cat-shadows');
+      if (!/From preset \(Medium\)/.test(await shadows.locator('option').first().textContent())) {
+        throw new Error('shadows select should default to the preset tier');
+      }
+      await shadows.selectOption('off');
+      await page.waitForFunction(() => /no shadows/.test(document.getElementById('gfx-summary').textContent));
+      const scale = page.locator('#gfx-scale');
+      await scale.focus();
+      await scale.press('ArrowLeft');
+      if ((await page.textContent('#gfx-scale-value')).trim() !== '95%') throw new Error('render scale slider did not respond');
+      await page.locator('#gfx-fps').check();
+      await page.waitForSelector('#lp-fps', { state: 'attached' });
+      const box = await page.locator('[data-gfx-section]').boundingBox();
+      const vw = page.viewportSize().width;
+      if (!box || box.x < 0 || box.x + box.width > vw + 1) throw new Error('graphics section overflows the viewport');
+      await shot('settings-graphics');
+      await page.reload();
+      await page.waitForSelector('.lp-title');
+      if ((await bodyPreset()) !== 'high') throw new Error('preset not persisted across reload');
+      await page.getByRole('button', { name: 'Settings' }).click();
+      await page.waitForSelector('[data-gfx-section]');
+      if ((await page.locator('#gfx-preset').inputValue()) !== 'high') throw new Error('preset select lost after reload');
+      if ((await page.locator('#gfx-cat-shadows').inputValue()) !== 'off') throw new Error('override lost after reload');
+      if (!(await page.locator('#gfx-fps').isChecked())) throw new Error('frame-rate toggle lost after reload');
+      // Choosing a preset clears the overrides; Auto keeps the rest of the run fast.
+      await page.locator('#gfx-fps').uncheck();
+      await page.locator('#gfx-preset').selectOption('auto');
+      if ((await page.locator('#gfx-cat-shadows').inputValue()) !== 'preset') throw new Error('preset did not clear overrides');
+      await page.waitForFunction(() => document.body.dataset.gfxPreset === 'low');
       await page.locator('.lp-settings .lp-back').click();
       await page.waitForSelector('.lp-title');
     });

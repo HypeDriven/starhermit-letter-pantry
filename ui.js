@@ -3,17 +3,26 @@
 // announcements, and persisted accessibility settings.
 
 import { loadJSON, saveJSON } from './session.js';
+import { PRESETS, CATEGORIES, presetTier, choosePreset } from './gfx.js';
+import { pickLocale, gfxT } from './gfx-i18n.js';
 import { ACHIEVEMENTS, JOURNEY, CHALLENGES, LESSONS, PRACTICE_DIFFICULTIES, THEMES, CONTENT_VERSION } from './content.js';
 
 export const DEFAULT_SETTINGS = {
   music: 0.6, effects: 0.8, ambience: 0.5,
-  graphics: 'medium', reducedMotion: false, highContrast: false,
+  gfx: {}, reducedMotion: false, highContrast: false,
   largerText: false, cvdPalette: false, leftHanded: false,
   hapticsOff: false, tutorialReplay: true,
 };
 
 export function loadSettings() {
-  return Object.assign({}, DEFAULT_SETTINGS, loadJSON('settings') || {});
+  const s = Object.assign({}, DEFAULT_SETTINGS, loadJSON('settings') || {});
+  // Legacy three-tier `graphics` setting → graphics preset (medium means Auto).
+  if ('graphics' in s) {
+    if (!s.gfx || !Object.keys(s.gfx).length) s.gfx = s.graphics === 'low' || s.graphics === 'high' ? { preset: s.graphics } : {};
+    delete s.graphics;
+  }
+  if (!s.gfx || typeof s.gfx !== 'object') s.gfx = {};
+  return s;
 }
 export function saveSettings(s) { saveJSON('settings', s); }
 
@@ -568,17 +577,7 @@ export class UI {
       el('h2', { text: 'Settings' }),
       el('fieldset', {}, el('legend', { text: 'Audio' }),
         slider('Music volume', 'music'), slider('Effects volume', 'effects'), slider('Ambience volume', 'ambience')),
-      el('fieldset', {}, el('legend', { text: 'Graphics' }),
-        el('label', { class: 'lp-setting' }, el('span', { text: 'Quality tier' }),
-          el('select', {
-            'aria-label': 'Quality tier',
-            onchange: (e) => this.updateSetting('graphics', e.target.value),
-          }, ['low', 'medium', 'high'].map((t) => {
-            const o = el('option', { value: t, text: t });
-            if (s.graphics === t) o.selected = true;
-            return o;
-          }))),
-        toggle('Reduced motion', 'reducedMotion'), toggle('High contrast', 'highContrast')),
+      this._graphicsSection(toggle),
       el('fieldset', {}, el('legend', { text: 'Accessibility' }),
         toggle('Larger text', 'largerText'), toggle('Color-vision-safe palette', 'cvdPalette'),
         toggle('Left-handed controls', 'leftHanded'), toggle('Haptics off', 'hapticsOff'),
@@ -590,6 +589,92 @@ export class UI {
     );
     if (inOverlay) this._openOverlay('settings', node);
     else this._setScreen('settings', node);
+  }
+
+  // Graphics section: quality preset, render scale, per-effect overrides,
+  // adaptive resolution, frame-rate readout and a GPU/cost summary. Strings
+  // come from gfx-i18n.js in the browser's locale.
+  _graphicsSection(toggle) {
+    const L = pickLocale(typeof navigator !== 'undefined' ? navigator.language : 'en-US');
+    const t = (k, v) => gfxT(L, k, v);
+    const tier = (x) => t('t_' + x);
+    const info = () => (this.h.getGraphicsInfo ? this.h.getGraphicsInfo() : null);
+    const detected = (info() || {}).detected || 'balanced';
+    const saved = () => Object.assign({}, this.settings.gfx || {});
+    const chosen = () => (PRESETS.includes((this.settings.gfx || {}).preset) ? this.settings.gfx.preset : 'auto');
+    const effective = () => (chosen() === 'auto' ? detected : chosen());
+    const save = (g) => { this.updateSetting('gfx', g); refresh(); setTimeout(updateSummary, 120); };
+    const row = (label, control, extra) => el('label', { class: 'lp-setting' }, el('span', { text: label }), extra || null, control);
+
+    const presetSel = el('select', {
+      id: 'gfx-preset', 'data-gfx': 'preset', 'aria-label': t('quality'),
+      onchange: (e) => save(choosePreset(saved(), e.target.value)),
+    }, el('option', { value: 'auto', text: t('auto', { tier: tier(detected) }) }),
+    PRESETS.map((p) => el('option', { value: p, text: tier(p) })));
+
+    const scaleOut = el('output', { id: 'gfx-scale-value', class: 'lp-gfx-value', for: 'gfx-scale' });
+    const scale = el('input', {
+      type: 'range', id: 'gfx-scale', 'data-gfx': 'render_scale', min: '50', max: '200', step: '5',
+      'aria-label': t('renderScale'),
+      oninput: (e) => { const g = saved(); g.render_scale = Number(e.target.value) / 100; save(g); },
+    });
+    const cats = {};
+    const catRows = Object.entries(CATEGORIES).map(([cat, tiers]) => {
+      cats[cat] = el('select', {
+        id: 'gfx-cat-' + cat, 'data-gfx-cat': cat, 'aria-label': t('cat_' + cat),
+        onchange: (e) => {
+          const g = saved();
+          if (e.target.value === 'preset') delete g[cat]; else g[cat] = e.target.value;
+          save(g);
+        },
+      }, el('option', { value: 'preset' }), tiers.map((x) => el('option', { value: x, text: tier(x) })));
+      return row(t('cat_' + cat), cats[cat]);
+    });
+    const check = (id, key, label) => {
+      const box = el('input', {
+        type: 'checkbox', id, 'data-gfx': key, 'aria-label': label,
+        onchange: (e) => { const g = saved(); g[key] = e.target.checked; save(g); },
+      });
+      return box;
+    };
+    const adaptive = check('gfx-adaptive', 'adaptive', t('adaptive'));
+    const fps = check('gfx-fps', 'show_fps', t('showFps'));
+    const summary = el('p', { id: 'gfx-summary', class: 'lp-gfx-summary' });
+    const note = el('p', { id: 'gfx-post-note', class: 'lp-gfx-note', role: 'note', hidden: '' });
+
+    const refresh = () => {
+      const g = this.settings.gfx || {};
+      presetSel.value = chosen();
+      const pct = Math.round((Number(g.render_scale) || 1) * 100);
+      scale.value = String(pct);
+      scaleOut.textContent = pct + '%';
+      for (const [cat, sel] of Object.entries(cats)) {
+        sel.options[0].textContent = t('fromPreset', { tier: tier(presetTier(effective(), cat)) });
+        sel.value = CATEGORIES[cat].includes(g[cat]) ? g[cat] : 'preset';
+      }
+      adaptive.checked = g.adaptive !== false;
+      fps.checked = !!g.show_fps;
+    };
+    const updateSummary = () => {
+      const i = info();
+      const text = i ? `${i.gpu || t('gpuUnknown')} · ${i.summary}` : t('noWebgl');
+      if (summary.textContent !== text) summary.textContent = text;
+      note.textContent = t('postUnavailable');
+      note.hidden = !(i && i.postFailed);
+    };
+    refresh();
+    updateSummary();
+    const timer = setInterval(() => { if (!summary.isConnected) clearInterval(timer); else updateSummary(); }, 1000);
+
+    return el('fieldset', { class: 'lp-gfx', 'data-gfx-section': '' }, el('legend', { text: t('graphics') }),
+      row(t('quality'), presetSel),
+      el('label', { class: 'lp-setting lp-gfx-scale' }, el('span', { text: t('renderScale') }),
+        el('span', { class: 'lp-gfx-range' }, scale, scaleOut)),
+      catRows,
+      row(t('adaptive'), adaptive),
+      row(t('showFps'), fps),
+      toggle('Reduced motion', 'reducedMotion'), toggle('High contrast', 'highContrast'),
+      summary, note);
   }
 
   showPreparing(label, countdownSeconds = 3) {
