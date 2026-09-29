@@ -668,3 +668,7 @@ cheaper and sharper as procedural geometry driven by the theme palette.
 - **Direct interaction with the 3D biscuits** (raycast pick and drag-to-spell) as an addition to,
   never a replacement for, the DOM controls.
 - **Gamepad navigation** across focusable targets with remappable primary/secondary actions.
+
+## Browser interference
+
+`browser-guard.js` (loaded from `index.html`) suppresses browser UI that gets in the way of play: the right-click context menu, the iOS long-press callout, copy / cut / paste, and page text selection. Text fields (inputs, textareas, selects, contenteditable) keep normal selection, context menu and clipboard behaviour.
