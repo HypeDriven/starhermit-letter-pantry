@@ -363,3 +363,14 @@ body.lp-high-contrast .lp-letter { background: #fff; color: #000; border-color: 
   .lp-current { font-size: 1.5em; }
   .lp-btn { padding: 0.35em 0.8em; }
 }
+
+/* StarHermit account buttons (title) + toast */
+.lp-account { display: flex; flex-wrap: wrap; justify-content: center; gap: 0.5em; margin-top: 0.6em; }
+.lp-toast {
+  position: fixed; left: 50%; transform: translateX(-50%);
+  bottom: calc(16px + var(--lp-safe-bottom)); z-index: 60;
+  max-width: min(92vw, 420px); margin: 0; padding: 0.6em 1em; border-radius: 10px;
+  background: var(--lp-panel); color: var(--lp-text); border: 1px solid var(--lp-accent);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.45); text-align: center;
+}
+.lp-toast[hidden] { display: none; }

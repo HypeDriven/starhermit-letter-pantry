@@ -5,6 +5,7 @@
 import { loadJSON, saveJSON } from './session.js';
 import { PRESETS, CATEGORIES, presetTier, choosePreset } from './gfx.js';
 import { pickLocale, gfxT } from './gfx-i18n.js';
+import { shStrings } from './sh-strings.js';
 import { ACHIEVEMENTS, JOURNEY, CHALLENGES, LESSONS, PRACTICE_DIFFICULTIES, THEMES, CONTENT_VERSION } from './content.js';
 
 export const DEFAULT_SETTINGS = {
@@ -47,6 +48,23 @@ function el(tag, attrs = {}, ...children) {
   return node;
 }
 
+// Keyboard actions → default KeyboardEvent.code values. Mirrors the control.*
+// lines in starhermit.txt; the player's StarHermit bindings replace them.
+export const DEFAULT_BINDINGS = {
+  next: ['ArrowRight', 'ArrowDown'], prev: ['ArrowLeft', 'ArrowUp'],
+  submit: ['Enter'], unpick: ['Backspace'], clear: ['Escape'],
+  pause: ['KeyP'], undo: ['KeyU'], hint: ['KeyH'], camera: ['KeyR'],
+};
+
+export function keyLabel(code) {
+  if (!code) return '—';
+  const named = { ArrowLeft: '←', ArrowRight: '→', ArrowUp: '↑', ArrowDown: '↓', Escape: 'Esc', Space: 'Space' };
+  if (named[code]) return named[code];
+  if (/^Key[A-Z]$/.test(code)) return code.slice(3);
+  if (/^Digit\d$/.test(code)) return code.slice(5);
+  return code;
+}
+
 function fmtTime(ms) {
   const s = Math.floor(ms / 1000);
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
@@ -66,13 +84,17 @@ export class UI {
     this.overlay = null;
     this.timerId = null;
     this.playerStatus = ''; // platform profile name + cloud sync status
+    this.account = { canSignIn: false, canInvite: false }; // StarHermit title buttons
+    this.shT = shStrings(typeof navigator !== 'undefined' ? (navigator.languages || [navigator.language]) : []);
+    this.setBindings(DEFAULT_BINDINGS);
     this.applySettingsClasses();
 
     root.innerHTML = '';
     this.livePolite = el('div', { class: 'lp-sr-only', role: 'status', 'aria-live': 'polite', id: 'lp-live' });
     this.liveAssert = el('div', { class: 'lp-sr-only', role: 'alert', 'aria-live': 'assertive', id: 'lp-alert' });
     this.screenRoot = el('div', { class: 'lp-screen-root', id: 'lp-screen' });
-    root.append(this.screenRoot, this.livePolite, this.liveAssert);
+    this.toastEl = el('p', { class: 'lp-toast', role: 'status', 'aria-live': 'polite', hidden: '' });
+    root.append(this.screenRoot, this.livePolite, this.liveAssert, this.toastEl);
     document.addEventListener('keydown', (e) => this._onKey(e));
   }
 
@@ -92,6 +114,28 @@ export class UI {
     }
   }
 
+  // Effective key bindings ({action: codes[]}); routed by event.code.
+  setBindings(bindings) {
+    this.bindings = bindings;
+    this.codeToAction = new Map();
+    for (const [action, codes] of Object.entries(bindings)) for (const c of codes) this.codeToAction.set(c, action);
+  }
+  _keys(action) { return (this.bindings[action] || []).map(keyLabel).join('/'); }
+
+  // Sign-in / invite visibility for the title screen; re-renders it if shown.
+  setAccount(account) {
+    this.account = Object.assign({}, this.account, account);
+    if (this.screen === 'title' && this._titleData) this.showTitle(this._titleData);
+  }
+
+  toast(msg) {
+    this.toastEl.textContent = msg;
+    this.toastEl.hidden = false;
+    clearTimeout(this._toastTimer);
+    this._toastTimer = setTimeout(() => { this.toastEl.hidden = true; }, 3200);
+    this.announce(msg);
+  }
+
   applySettingsClasses() {
     const b = document.body;
     b.classList.toggle('lp-high-contrast', !!this.settings.highContrast);
@@ -104,6 +148,7 @@ export class UI {
   updateSetting(key, value) {
     this.settings[key] = value;
     saveSettings(this.settings);
+    this.h.onSettingsSaved && this.h.onSettingsSaved(this.settings);
     this.applySettingsClasses();
     this.h.onSettingsChanged && this.h.onSettingsChanged(this.settings);
   }
@@ -128,23 +173,24 @@ export class UI {
     if (this.screen !== 'play' || !this.session) return;
     // Never hijack browser/OS chords (Ctrl+R reload, Cmd+P print, …).
     if (e.ctrlKey || e.metaKey || e.altKey) return;
+    const act = this.codeToAction.get(e.code);
     if (this.overlay) {
-      if (e.key === 'Escape') { e.preventDefault(); this.closeOverlay(); }
+      if (act === 'clear') { e.preventDefault(); this.closeOverlay(); }
       return;
     }
     const cmd = (c) => { e.preventDefault(); this.command(c); };
-    switch (e.key) {
-      case 'p': case 'P': cmd(null); this.showPause(); break;
-      case 'u': case 'U': cmd({ type: 'undo' }); break;
-      case 'h': case 'H': cmd({ type: 'hint' }); break;
-      case 'r': case 'R': e.preventDefault(); this.h.onCameraReset && this.h.onCameraReset(); this.announce('Camera reset.'); break;
-      case 'Backspace': {
+    switch (act) {
+      case 'pause': cmd(null); this.showPause(); break;
+      case 'undo': cmd({ type: 'undo' }); break;
+      case 'hint': cmd({ type: 'hint' }); break;
+      case 'camera': e.preventDefault(); this.h.onCameraReset && this.h.onCameraReset(); this.announce('Camera reset.'); break;
+      case 'unpick': {
         const sel = this.session.state.selected;
         if (sel.length) cmd({ type: 'deselect', index: sel[sel.length - 1] });
         break;
       }
-      case 'Escape': cmd({ type: 'clear' }); break;
-      case 'Enter': {
+      case 'clear': cmd({ type: 'clear' }); break;
+      case 'submit': {
         // If focus is not on a button, Enter submits the current word.
         if (!/BUTTON/.test(document.activeElement && document.activeElement.tagName)) cmd({ type: 'submit' });
         break;
@@ -177,6 +223,7 @@ export class UI {
   // Screens
 
   showTitle(data) {
+    this._titleData = data;
     const { progression, dailyDate, hasSnapshot } = data;
     const done = progression.completedStages.length;
     const node = el('main', { class: 'lp-title lp-panel', role: 'main' },
@@ -191,6 +238,10 @@ export class UI {
         el('button', { class: 'lp-btn', onclick: () => this.showSettings() }, 'Settings'),
       ),
       this.playerStatus ? el('p', { class: 'lp-player-status', id: 'lp-player-status', text: this.playerStatus }) : null,
+      (this.account.canSignIn || this.account.canInvite) ? el('div', { class: 'lp-account' },
+        this.account.canSignIn ? el('button', { class: 'lp-btn', id: 'lp-signin', onclick: () => this.h.onSignIn && this.h.onSignIn() }, this.shT.signIn) : null,
+        this.account.canInvite ? el('button', { class: 'lp-btn', id: 'lp-invite', onclick: () => this.h.onInvite && this.h.onInvite() }, this.shT.invite) : null,
+      ) : null,
       el('p', { class: 'lp-version', text: `Content ${CONTENT_VERSION}` }),
     );
     this._setScreen('title', node);
@@ -350,8 +401,9 @@ export class UI {
       btn.addEventListener('keydown', (e) => {
         const letters = [...wrap.querySelectorAll('.lp-letter')];
         const idx = letters.indexOf(btn);
-        if (e.key === 'ArrowRight' || e.key === 'ArrowDown') { e.preventDefault(); letters[(idx + 1) % letters.length].focus(); }
-        if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') { e.preventDefault(); letters[(idx - 1 + letters.length) % letters.length].focus(); }
+        const act = this.codeToAction.get(e.code);
+        if (act === 'next') { e.preventDefault(); letters[(idx + 1) % letters.length].focus(); }
+        if (act === 'prev') { e.preventDefault(); letters[(idx - 1 + letters.length) % letters.length].focus(); }
       });
       wrap.append(btn);
     });
@@ -548,7 +600,7 @@ export class UI {
         card('Select', 'Tap or focus a letter and press Enter to pick it. Letters form a word in pick order.'),
         card('Submit', 'With 3+ letters picked, press Submit. Invalid words cost 25 points and break your streak.'),
         card('Tools', 'Shuffle mixes the tray. Undo takes back an action where allowed. Hint reveals a letter of an unfound word.'),
-        card('Keyboard', 'Arrows move between letters · Enter picks · Backspace unpicks · P pause · U undo · H hint · R camera reset.'),
+        card('Keyboard', `${this._keys('prev')} ${this._keys('next')} move between letters · Enter picks a focused letter · ${this._keys('submit')} submits · ${this._keys('unpick')} unpicks · ${this._keys('clear')} clears · ${this._keys('pause')} pause · ${this._keys('undo')} undo · ${this._keys('hint')} hint · ${this._keys('camera')} camera reset.`),
         card('Scoring', 'Target word 100 + 25 per letter past 3. Bonus word 50 + 10 per letter past 3. Streaks add 15 each. Beat par time for a bonus.'),
       ),
       el('button', { class: 'lp-btn lp-back', onclick: () => inOverlay ? this.showPause() : this.h.onLeaveRound('to-title') }, 'Back'),

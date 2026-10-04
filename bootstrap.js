@@ -6,7 +6,7 @@ import * as rules from './rules.js';
 import * as content from './content.js';
 import { Session, loadJSON, saveJSON } from './session.js';
 import { createRenderer } from './render.js';
-import { UI, loadSettings } from './ui.js';
+import { UI, loadSettings, saveSettings, DEFAULT_SETTINGS, DEFAULT_BINDINGS } from './ui.js';
 import { PantryAudio } from './audio.js';
 import { platform } from './platform.js';
 
@@ -24,10 +24,6 @@ const app = {
   audio: null,
   ui: null,
   meta: null,          // {mode, modeLabel, descriptor, lesson?, lessonTracker?}
-  hosted: false,       // true only after a validated /api/v1/time probe against
-                       // the game's OWN server.js (local dev backend); platform
-                       // hosting is tracked separately by `platform.active`
-  timeOffsetMs: 0,     // serverNow - localNow (round-trip adjusted)
   progression: null,
   tutorial: null,
   stats: null,
@@ -46,7 +42,7 @@ function persist(key, value) {
 
 function syncStatusText() {
   if (!platform.active) return '';
-  const name = platform.playerName || 'Player ' + (platform.sub || '?').slice(0, 8);
+  const name = platform.playerName || 'Player ' + (platform.sub || '?').slice(0, 6);
   const sync = { saving: 'syncing…', synced: 'synced', offline: 'sync unavailable — local save' }[platform.syncStatus] || '';
   return sync ? `${name} · ${sync}` : name;
 }
@@ -81,58 +77,15 @@ function loadBoards() {
 }
 
 // ---------------------------------------------------------------------------
-// Server integration (recoverable when absent: file:// or static hosting).
+// Clock: the device's UTC date drives the Daily. No own-server route is ever
+// called (standalone makes no network request; the platform has no time route
+// this game needs).
 
-async function api(path, options = {}) {
-  const res = await fetch(path, {
-    headers: { 'content-type': 'application/json' },
-    ...options,
-  });
-  const body = await res.json().catch(() => null);
-  if (!res.ok || (body && body.error)) {
-    const err = new Error((body && body.error) || `HTTP ${res.status}`);
-    err.recoverable = true;
-    throw err;
-  }
-  return body;
-}
-
-// Probe the game's OWN server.js time endpoint ONCE at startup and validate
-// the payload numerically. Only when it yields a finite epoch do we set
-// `hosted` (the local-dev backend with replay-validated score submission);
-// every other hosted feature is gated on that flag and no-ops locally
-// otherwise. On the StarHermit platform (`platform.active`) this probe is
-// skipped: /api/v1/time is not a platform route and must not 404 there.
-
-async function syncServerTime() {
-  if (platform.active) {
-    app.hosted = false;
-    app.timeOffsetMs = 0; // platform: local clock drives the UTC date
-    return;
-  }
-  try {
-    const t0 = Date.now();
-    const res = await fetch('/api/v1/time', { cache: 'no-store' });
-    if (!res.ok) throw new Error('no-time');
-    const body = await res.json();
-    const t1 = Date.now();
-    // Hosts expose the epoch under different keys (`now`, `serverTime`, `epochMs`).
-    const serverMs = Number(body && (body.now ?? body.serverTime ?? body.epochMs));
-    if (!Number.isFinite(serverMs)) throw new Error('no-time');
-    app.timeOffsetMs = serverMs - Math.round((t0 + t1) / 2);
-    app.hosted = true;
-  } catch {
-    app.hosted = false;
-    app.timeOffsetMs = 0; // offline fallback: local UTC date
-  }
-}
-
-function serverNowMs() { return Date.now() + app.timeOffsetMs; }
+function nowMs() { return Date.now(); }
 
 // ---------------------------------------------------------------------------
-// Achievements — local, part of the cloud-saved progress doc. On the game's
-// own server.js (local dev backend) unlocks are additionally mirrored via an
-// idempotent POST; the platform has no client-authoritative unlock path.
+// Achievements — local, part of the cloud-saved progress doc; the platform has
+// no client-authoritative unlock path.
 
 function checkAchievements(context) {
   const { outcome, descriptor, snapshot } = context;
@@ -149,15 +102,7 @@ function checkAchievements(context) {
   if (app.stats.completionStreak >= 3) unlock('streak_3');
   if (outcome === 'completed' && descriptor.tier === 'hard' && descriptor.id.startsWith('journey')) unlock('hard_milestone');
   if (app.stats.targetWordsFound >= 100) unlock('long_term_pantry');
-  if (newly.length) {
-    persist('achievements', app.achievements);
-    if (app.hosted && !platform.active) {
-      api('/api/v1/achievements', {
-        method: 'POST',
-        body: JSON.stringify({ ids: newly.map((a) => a.id) }),
-      }).catch(() => {}); // offline: local mirror is authoritative enough
-    }
-  }
+  if (newly.length) persist('achievements', app.achievements);
   return newly;
 }
 
@@ -275,7 +220,7 @@ async function showResults() {
       app.boards.daily[descriptor.seed] = {
         score: snap.score.total,
         durationMs: snap.elapsedMs,
-        date: content.todayISO(serverNowMs()),
+        date: content.todayISO(nowMs()),
       };
       persist('boards', app.boards);
     }
@@ -295,32 +240,8 @@ async function showResults() {
       } catch {
         comparison = `Leaderboard unavailable — score kept locally. ${bestText}`;
       }
-    } else if (!app.hosted) {
-      comparison = 'Leaderboard unavailable — score kept locally. ' + bestText;
-    } else try {
-      const terminal = session.envelope.terminalResult || { durationMs: snap.elapsedMs };
-      await api('/api/v1/score', {
-        method: 'POST',
-        body: JSON.stringify({
-          ruleset: rules.RULESET,
-          contentVersion: content.CONTENT_VERSION,
-          seed: descriptor.seed,
-          assists: { hintsUsed: snap.hintsUsed, undoUsed: snap.mechanics.undo === true },
-          durationMs: terminal.durationMs,
-          commands: session.envelope.commands,
-          score: snap.score.total,
-          board: 'daily',
-        }),
-      });
-      const board = await api('/api/v1/leaderboard?board=daily&seed=' + encodeURIComponent(descriptor.seed));
-      const entries = board.entries || [];
-      const rank = entries.findIndex((e) => e.score <= snap.score.total);
-      comparison = entries.length
-        ? `Daily board: your score ${snap.score.total} vs best ${entries[0].score} (${entries.length} entries).`
-        : 'Daily board: you are the first entry today.';
-      if (rank === 0) comparison = 'Top of the daily board!';
-    } catch (err) {
-      comparison = 'Leaderboard unavailable — score kept locally. ' + bestText;
+    } else {
+      comparison = 'Score kept on this device. ' + bestText;
     }
   }
 
@@ -352,7 +273,7 @@ function showTitle() {
   setState('title', 'home');
   app.ui.showTitle({
     progression: app.progression,
-    dailyDate: content.todayISO(serverNowMs()),
+    dailyDate: content.todayISO(nowMs()),
     hasSnapshot: !!loadJSON('last-snapshot'),
   });
 }
@@ -384,12 +305,12 @@ const handlers = {
     prepareRound(d, { mode: 'journey', modeLabel: `Journey stage ${i + 1} — ${d.tier}`, descriptor: d });
   },
   onPlayDaily() {
-    const date = content.todayISO(serverNowMs());
+    const date = content.todayISO(nowMs());
     const d = content.deriveDaily(date);
     prepareRound(d, { mode: 'daily', modeLabel: `Daily Pantry — ${date}`, descriptor: d });
   },
   onPlayPractice(diff) {
-    const d = content.derivePractice(diff, Math.floor(serverNowMs() / 60000));
+    const d = content.derivePractice(diff, Math.floor(nowMs() / 60000));
     prepareRound(d, { mode: 'practice', modeLabel: `Practice — ${diff}`, descriptor: d });
   },
   onPlayChallenge(id) {
@@ -445,6 +366,14 @@ const handlers = {
     handlers.onPlayJourney(i);
   },
   onCommand(cmd) { return app.session ? app.session.dispatch(cmd) : { ok: false, reason: 'no-session' }; },
+  onSettingsSaved(settings) { platform.pushSettings(settings); },
+  onSignIn() { platform.signIn(); },
+  async onInvite() {
+    const link = platform.inviteLink();
+    if (!link) return;
+    try { await navigator.clipboard.writeText(link); app.ui.toast(app.ui.shT.copied); }
+    catch { app.ui.toast(app.ui.shT.copyFailed); }
+  },
   onSettingsChanged(settings) {
     app.audio.setVolume('music', settings.music);
     app.audio.setVolume('effects', settings.effects);
@@ -490,7 +419,17 @@ async function boot() {
   // remote-preferred source for every persistent key, so merge it into the
   // localStorage cache before the in-memory copies load.
   const platformActive = platform.init();
-  if (platformActive) await platform.loadCloud();
+  if (platformActive) {
+    const [, kv] = await Promise.all([platform.loadCloud(), platform.loadSettings()]);
+    // Per-player settings KV wins over the local copy, key by key.
+    const local = loadSettings();
+    let changed = false;
+    for (const k of Object.keys(DEFAULT_SETTINGS)) {
+      if (kv && kv[k] !== undefined && kv[k] !== null) { local[k] = kv[k]; changed = true; }
+    }
+    if (changed) saveSettings(local);
+    platform.primeSettings(local);
+  }
 
   app.progression = loadProgression();
   app.tutorial = loadTutorial();
@@ -502,6 +441,14 @@ async function boot() {
   app.ui = new UI(uiRoot, handlers);
   platform.onStatus = () => updatePlayerStatus();
   updatePlayerStatus();
+  const refreshAccount = () => app.ui.setAccount({ canSignIn: platform.canSignIn(), canInvite: platform.active });
+  refreshAccount();
+  platform.onAuth((a) => {
+    refreshAccount();
+    updatePlayerStatus();
+    if (!a.signedIn) app.ui.toast(app.ui.shT.signedOut); // keep playing locally
+  });
+  if (platformActive) platform.loadBindings(DEFAULT_BINDINGS).then((b) => app.ui.setBindings(b));
   app.audio = new PantryAudio({
     seed: 'session',
     caption: (text) => app.ui.announce(text),
@@ -554,7 +501,6 @@ async function boot() {
   const validation = content.validateContent();
   if (!validation.ok) console.warn('content validation issues:', validation.errors);
 
-  await syncServerTime();
   if (platformActive) {
     // Nickname from the platform profile (never /api/v1/me, never usernames);
     // the fallback name is already in place from init().

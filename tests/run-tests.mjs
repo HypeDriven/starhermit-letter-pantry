@@ -7,10 +7,9 @@ import { fileURLToPath } from 'node:url';
 
 import * as rules from '../rules.js';
 import * as content from '../content.js';
-import { Session } from '../session.js';
-import {
-  zipStore, unzipFirstEntry, bytesToBase64, base64ToBytes, decodeJwtPayload, createPlatform,
-} from '../platform.js';
+import { Session, loadJSON, saveJSON } from '../session.js';
+import fs from 'node:fs';
+import { createPlatform } from '../platform.js';
 import * as gfx from '../gfx.js';
 import { GFX_STRINGS, pickLocale, gfxT } from '../gfx-i18n.js';
 
@@ -322,69 +321,115 @@ await test('session: envelope records hashes and terminal result', () => {
 // ---------------------------------------------------------------------------
 // Platform adapter
 
-await test('platform: cloud zip is a valid stored zip and round-trips', () => {
-  const doc = { schemaVersion: 1, savedAt: 1726000000000, stats: { roundsCompleted: 3 } };
-  const payload = new TextEncoder().encode(JSON.stringify(doc));
-  const zip = zipStore('save.json', payload);
-  // Local file header + EOCD signatures.
-  assert.equal(zip[0], 0x50); assert.equal(zip[1], 0x4b); assert.equal(zip[2], 0x03); assert.equal(zip[3], 0x04);
-  const eocd = zip.length - 22;
-  assert.equal(zip[eocd], 0x50); assert.equal(zip[eocd + 1], 0x4b); assert.equal(zip[eocd + 2], 0x05); assert.equal(zip[eocd + 3], 0x06);
-  // base64 survives the PUT/GET body encoding.
-  const back = base64ToBytes(bytesToBase64(zip));
-  assert.deepEqual(back, zip);
-  const decoded = JSON.parse(new TextDecoder().decode(unzipFirstEntry(back)));
-  assert.deepEqual(decoded, doc);
-});
-
-await test('platform: JWT payload decodes sub + game_scope; garbage is null', () => {
-  const b64url = (o) => bytesToBase64(new TextEncoder().encode(JSON.stringify(o)))
-    .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-  const token = `e30.${b64url({ sub: 'user-1234', game_scope: 'letter-pantry', exp: 1726000000 })}.sig`;
-  const claims = decodeJwtPayload(token);
-  assert.equal(claims.sub, 'user-1234');
-  assert.equal(claims.game_scope, 'letter-pantry');
-  assert.equal(decodeJwtPayload('not-a-jwt'), null);
-  assert.equal(decodeJwtPayload('a.b!'), null);
-});
-
-await test('platform: no-token instance is inert; Bearer + refresh + fallback name', async () => {
-  // Offline instance: nothing platform-side may fire.
-  const offline = createPlatform();
-  assert.equal(offline.active, false);
-  assert.equal(await offline.loadCloud(), false);
-  assert.equal(await offline.fetchLeaderboard(), null);
-  assert.equal(await offline.resolveName('abcdefgh'), 'Player abcdefgh');
-  offline.markDirty();
-  offline.flushSave();
-
-  // Hosted instance against a stubbed fetch.
-  const calls = [];
-  const realFetch = globalThis.fetch;
-  globalThis.fetch = async (url, options = {}) => {
-    calls.push({ url: String(url), headers: options.headers || {} });
-    if (String(url).endsWith('/launch-token')) return { ok: true, json: async () => ({ token: 'new-token' }) };
-    if (String(url).includes('/users/u1/profile')) return { ok: true, json: async () => ({ id: 'u1', username: 'secretname', nickname: 'Baker Bo' }) };
-    if (String(url).includes('/profile')) return { ok: true, json: async () => ({ id: 'other-id-xyz', username: 'othername', nickname: null }) };
-    return { ok: true, json: async () => ({}) };
+// The adapter runs over the real shared SDK with a stubbed fetch + launch hash.
+const SDK_SRC = fs.readFileSync(path.join(ROOT, 'starhermit-sdk.js'), 'utf8');
+function loadSdk() {
+  const mod = { exports: {} };
+  new Function('module', 'exports', 'self', SDK_SRC)(mod, mod.exports, globalThis);
+  return mod.exports;
+}
+const SH_USER = 'a1b2c3d4-0000-4000-8000-000000000001';
+const SH_SLUG = 'letter-pantry';
+function shFixture(href) {
+  const b64url = (o) => Buffer.from(JSON.stringify(o)).toString('base64url');
+  const jwt = `${b64url({ alg: 'none' })}.${b64url({ sub: SH_USER, game_scope: SH_SLUG, exp: Math.floor(Date.now() / 1000) + 3600 })}.sig`;
+  const u = new URL(href.replace('{jwt}', jwt));
+  const win = {
+    location: { href: u.href, hostname: u.hostname, pathname: u.pathname, search: u.search, hash: u.hash, origin: u.origin, assign() {} },
+    history: { state: null, replaceState(_s, _t, url) { win.replaced = url; } },
   };
-  try {
-    const p = createPlatform();
-    p.active = true; p.token = 'old-token'; p.sub = 'u1'; p.slug = 'letter-pantry';
-    await p.api('/api/v1/anything', { method: 'POST', body: '{}' });
-    assert.equal(calls[0].headers.authorization, 'Bearer old-token');
-    assert.equal(calls[0].headers['content-type'], 'application/json');
+  const calls = [];
+  let slot = null;
+  const kv = { music: 0.2 };
+  const res = (status, body, bytes) => ({
+    ok: status >= 200 && status < 300, status,
+    text: async () => (body == null ? '' : JSON.stringify(body)),
+    arrayBuffer: async () => bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength),
+  });
+  const fetch = async (url, init = {}) => {
+    const method = init.method || 'GET';
+    const body = init.body ? JSON.parse(init.body) : undefined;
+    calls.push({ url, method, body, auth: (init.headers || {}).Authorization });
+    if (url === `/api/v1/users/${SH_USER}/profile`) return res(200, { nickname: 'Baker Bo', username: 'secretname' });
+    if (url === `/api/v1/me/cloud-saves/${encodeURIComponent('game:' + SH_SLUG)}`) {
+      if (method === 'PUT') { slot = new Uint8Array(Buffer.from(body.dataBase64, 'base64')); return res(204); }
+      return slot ? res(200, null, slot) : res(404);
+    }
+    if (url === `/api/v1/games/${SH_SLUG}/settings`) {
+      if (method === 'PATCH') Object.assign(kv, body.settings);
+      return res(200, { settings: kv });
+    }
+    return res(404);
+  };
+  const sh = loadSdk().create({ window: win, fetch });
+  return { sh, win, calls, kv, platform: createPlatform({ sh }) };
+}
+const memStore = new Map();
+globalThis.localStorage = {
+  getItem: (k) => (memStore.has(k) ? memStore.get(k) : null),
+  setItem: (k, v) => memStore.set(k, String(v)),
+  removeItem: (k) => memStore.delete(k),
+};
 
-    await p.refreshToken();
-    assert.equal(p.token, 'new-token');
+await test('platform: launch token read + stripped; profile nickname; Bearer', async () => {
+  const { platform: p, win, calls } = shFixture('https://letter-pantry.starhermit.com/#game_token={jwt}');
+  assert.equal(p.init(), true);
+  assert.equal(p.active, true);
+  assert.equal(p.sub, SH_USER);
+  assert.equal(p.slug, SH_SLUG);
+  assert.ok(!String(win.replaced).includes('game_token'));
+  assert.equal(await p.loadOwnProfile(), 'Baker Bo');
+  assert.match(calls[0].auth, /^Bearer /);
+  assert.ok(!calls.some((c) => c.url.includes('/api/v1/me/') && !c.url.includes('cloud-saves')));
+});
 
-    assert.equal(await p.loadOwnProfile(), 'Baker Bo');
-    assert.equal(await p.resolveName('u1'), 'Baker Bo');
-    assert.equal(await p.resolveName('other-id-xyz'), 'Player other-id');
-    assert.ok(!calls.some((c) => c.url.includes('/api/v1/me')), '/api/v1/me must never be called');
-  } finally {
-    globalThis.fetch = realFetch;
-  }
+await test('platform: cloud save round-trips at game:<slug>', async () => {
+  const { platform: p, calls } = shFixture('https://x.example/#game_token={jwt}');
+  p.init();
+  saveJSON('stats', { roundsCompleted: 9 });
+  p.markDirty();
+  await p.flushSave();
+  const put = calls.find((c) => c.method === 'PUT');
+  assert.equal(put.url, '/api/v1/me/cloud-saves/game%3Aletter-pantry');
+  saveJSON('stats', { roundsCompleted: 0 });
+  assert.equal(await p.loadCloud(), true);
+  assert.deepEqual(loadJSON('stats'), { roundsCompleted: 9 });
+  assert.equal(p.syncStatus, 'synced');
+});
+
+await test('platform: settings KV load + changed-key patch', async () => {
+  const { platform: p, calls, kv } = shFixture('https://x.example/#game_token={jwt}');
+  p.init();
+  assert.deepEqual(await p.loadSettings(), { music: 0.2 });
+  p.primeSettings({ music: 0.2, effects: 0.8 });
+  p.pushSettings({ music: 0.2, effects: 0.4 });
+  await p.flushSettings();
+  const patch = calls.find((c) => c.method === 'PATCH');
+  assert.equal(patch.url, `/api/v1/games/${SH_SLUG}/settings`);
+  assert.deepEqual(patch.body, { settings: { effects: 0.4 } });
+  assert.equal(kv.effects, 0.4);
+  assert.equal(p.inviteLink(), `https://dashboard.starhermit.com/game-invite/${SH_USER}/${SH_SLUG}`);
+});
+
+await test('platform: standalone makes no fetch and stays local', async () => {
+  const { platform: p, calls } = shFixture('http://localhost:8080/index.html');
+  assert.equal(p.init(), false);
+  assert.equal(await p.loadCloud(), false);
+  assert.deepEqual(await p.loadSettings(), {});
+  assert.equal(await p.fetchLeaderboard(), null);
+  assert.equal(await p.resolveName('abcdefgh'), 'Player abcdef');
+  assert.deepEqual(await p.loadBindings({ pause: ['KeyP'] }), { pause: ['KeyP'] });
+  p.markDirty();
+  p.primeSettings({});
+  p.pushSettings({ music: 1 });
+  await p.flushSave();
+  assert.equal(p.canSignIn(), false);
+  assert.equal(p.inviteLink(), null);
+  assert.equal(calls.length, 0);
+  const onHost = shFixture('https://letter-pantry.starhermit.com/');
+  assert.equal(onHost.platform.init(), false);
+  assert.equal(onHost.platform.canSignIn(), true);
+  assert.equal(onHost.calls.length, 0);
 });
 
 // ---------------------------------------------------------------------------

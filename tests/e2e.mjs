@@ -10,9 +10,8 @@
  * The repo's server.js is the StarHermit authoritative game script (score
  * validation, leaderboard writes), NOT a dev static server, so this test
  * embeds its own minimal node:http static server on an ephemeral port.
- * The game detects the missing /api/v1/* routes and runs fully offline
- * (practice/journey are local by design); ranked daily submission is
- * therefore not exercised here.
+ * Without a launch token the game runs standalone and must make zero
+ * same-origin /api or /ws requests (asserted for the whole pass).
  *
  * Word knowledge (Journey stage letters/targets) is imported from the shared
  * content module purely to decide WHICH visible buttons to click — every
@@ -95,13 +94,12 @@ async function playthrough(label, viewport, hasTouch) {
   const context = await browser.newContext({ viewport, hasTouch });
   const page = await context.newPage();
   const errors = [];
+  // Standalone (no launch token) must not touch any own-server route.
+  const ownServer = [];
+  page.on('request', (r) => { const u = new URL(r.url()); if (/^https?:$/.test(u.protocol) && /^\/(api|ws)(\/|$)/.test(u.pathname)) ownServer.push(r.method() + ' ' + u.pathname); });
   page.on('pageerror', (e) => errors.push(`pageerror: ${e.message}`));
   page.on('console', (m) => {
     if ((m.type() !== 'error' && m.type() !== 'warning') || browserNoise.test(m.text())) return;
-    // Expected offline probe: bootstrap.js intentionally fetches /api/v1/time
-    // once to detect hosting; the embedded static server 404s it and the game
-    // deliberately falls back to local (unhosted) mode.
-    if (m.text().includes('404') && (m.location()?.url || '').includes('/api/v1/time')) return;
     errors.push(`console: ${m.text()}`);
   });
 
@@ -362,6 +360,8 @@ async function playthrough(label, viewport, hasTouch) {
       await shot('title-return');
     });
   } finally {
+    if (ownServer.length) failures.push(`[${label}] standalone requested own-server routes: ` + ownServer.join(', '));
+    else console.log(`ok - [${label}] standalone made zero /api or /ws requests`);
     if (errors.length) failures.push(`[${label}] page errors:\n  ` + errors.join('\n  '));
     await context.close();
   }

@@ -24,8 +24,10 @@ hiding in that tray has been served.
 | File | Responsibility |
 |---|---|
 | `index.html` | Shell: canvas `#game-canvas`, `#ui-root`, import map (`three`, `three/addons/`), ES-module bootstrap, `THREE` global bridge |
-| `bootstrap.js` | App state machine, module wiring, server-time probe (dev backend), progression, achievements, score submission, cloud-sync hooks, error recovery |
-| `platform.js` | StarHermit platform adapter: launch token (fragment, Bearer, 45-min refresh), profile/nickname, cloud save (zip+base64, debounced), read-only leaderboard |
+| `bootstrap.js` | App state machine, module wiring, progression, achievements, local daily bests, cloud-sync hooks, error recovery |
+| `starhermit-sdk.js` | Shared StarHermit client (unmodified copy) |
+| `platform.js` | Adapter over the SDK: hosted flag, nickname, cloud-save mirror + sync status, settings KV, key bindings, sign-in/invite, read-only leaderboard |
+| `sh-strings.js` | Account strings in the nine locales |
 | `rules.js` | Pure deterministic rules engine: RNG, commands, scoring, undo, serialization, replay. No DOM, no timers |
 | `content.js` | Versioned content: dictionary-derived stages, lessons, journey table, challenges, daily generator, themes, achievements, offline validator |
 | `session.js` | Session orchestration: command ids, monotonic clock, replay envelope, checksummed `localStorage` |
@@ -36,7 +38,7 @@ hiding in that tray has been served.
 | `vendor/` | `three.module.min.js` (r170) and `three/addons/` (r170 post-processing passes, shaders, `RoomEnvironment`) |
 | `audio.js` | WebAudio: sample one-shots from `sfx/`, synth fallbacks, three buses, adaptive music bed |
 | `words.js` | The shipped dictionary (`WORDS`, `WORD_SET`) |
-| `server.js` | Local dev backend (static hosting + `/api/v1/*`: time, daily, score, leaderboard, achievements); plain Node script, not a platform game script |
+| `server.js` | Local dev backend (static hosting + `/api/v1/*`: time, daily, score, leaderboard, achievements; the client no longer calls these); plain Node script, not a platform game script |
 | `style.css` | Layout, palette, responsive breakpoints, accessibility classes |
 | `assets/` | `title-backdrop.webp`, `results-tray.webp` |
 | `sfx/` | 15 Opus clips + `manifest.txt` (canonical), `manifest.md`, `manifest.json` |
@@ -210,13 +212,12 @@ undo), `NOSHUFFLE` (master, fixed tray, 12 moves), `LARDER` (harvest, 10 moves, 
 **Daily.** `dailySeed(date) = 'daily:' + ISO date`; the base word is drawn from the non-easy
 Journey bases and the tier is hard at ≥7 letters. Client and server run the identical function,
 so `server.js` can rebuild any day's descriptor from the seed string alone. UTC date comes from
-the `/api/v1/time` probe when hosted, local clock otherwise. Published seeds are immutable.
+the device clock. Published seeds are immutable.
 
 **Unlocks and achievements.** Five achievements (`content.ACHIEVEMENTS`): `first_completion`,
 `mechanic_mastery` (all lessons), `streak_3` (three completions without a resignation),
 `hard_milestone` (a hard Journey stage), `long_term_pantry` (100 cumulative target words).
-Unlocks are local — part of the cloud-saved progress doc — and additionally POSTed
-idempotently to the dev backend's `/api/v1/achievements` when no launch token is present.
+Unlocks are local — part of the cloud-saved progress doc; no request is made.
 
 ---
 
@@ -486,23 +487,35 @@ The remaining work is tracked in §17.
 Manifest (`starhermit.txt`): `name=Letter Pantry`, `launch=index.html`, `owner=<uuid>`,
 `server=server.js`, `cover=cover.jpg`. Conventions per <https://wiki.starhermit.com/>.
 
-**Used (on-platform, launch token present).**
+Manifest also lists one `control.<action>=<Code>[+<Code>] | <Label>` line per keyboard action
+(next, prev, submit, unpick, clear, pause, undo, hint, camera).
+
+All platform calls go through the shared client `starhermit-sdk.js` (loaded before the game
+modules) via the adapter `platform.js`. Without a launch token nothing calls the platform.
+
+**Used (on-platform).**
 
 | Feature | How |
 |---|---|
-| Launch token | `#game_token=` fragment read once at boot and stripped via `history.replaceState`; JWT `sub`/`game_scope` decoded (slug never hard-coded); `Authorization: Bearer` on every platform call; re-mint every 45 min via `POST /api/v1/games/{slug}/launch-token` (60 s retry on failure) |
-| Profile | `GET /api/v1/users/{sub}/profile` → nickname (fallback `"Player " + id.slice(0,8)`) shown on the title screen and in the play HUD; `/api/v1/me` is never called and usernames are never displayed |
-| Cloud save | `PUT/GET /api/v1/me/cloud-saves/{slug}` — one zip+base64 slot (`save.json` via the stored-zip helper in `platform.js`); remote-preferred load, 2 s debounce + `pagehide`/`visibilitychange` flush, sync status next to the player name; localStorage stays the offline cache |
-| Leaderboards | Read-only: `GET /api/v1/games/{slug}` → `leaderboardId`, then `GET /api/v1/leaderboards/{leaderboardId}/entries?friendsOnly=&page=&pageSize=` with userIds resolved to nicknames via the profile helper; without a `leaderboardId` only local records show. Daily personal bests live locally (in the cloud-saved doc) |
-| Achievements | Local only (part of the cloud-saved progress doc); `server.js` is not a Jint game script, so there is no script-owned unlock path |
+| Launch token + renewal | `StarHermit.init()` reads `#game_token=` (library launch) or `#access_token=` (sign-in return), strips it, and renews it before expiry. If renewal is refused the game toasts "signed out", hides the invite button and keeps playing and saving locally |
+| Sign-in | On `<id>.starhermit.com` without a token the title shows **Sign in with StarHermit** (`StarHermit.signIn()`); hidden when signed in and when running locally |
+| Profile | Profile `nickname` (fallback `Player <id prefix>`) shown with the sync status on the title screen and in the play HUD; `/api/v1/me` is never called and usernames are never displayed |
+| Cloud save | The five progress keys are mirrored to the `game:<slug>` cloud-save slot: remote-preferred load at boot, 2 s debounce after every persisted change, keepalive flush on `pagehide`/hidden tab; localStorage stays the offline cache |
+| Settings KV | All preferences (volumes, graphics, reduced motion, high contrast, larger text, colour-vision palette, left-handed, haptics, tutorial prompts) are patched to the per-player settings store on change (changed keys only); at boot the stored values override local ones |
+| Controls | Keyboard input is routed by `event.code` through `StarHermit.loadBindings()` (defaults = the manifest `control.*` lines); the Help "Keyboard" card lists the effective keys |
+| Invite link | Signed-in players get **Invite a friend** on the title, copying `StarHermit.inviteLink()` with a confirmation toast |
+| Leaderboards | Read-only: the Daily results line shows the top entry of the game's first platform board when one exists (`StarHermit.leaderboard()`, names via profiles); otherwise only local records show. Daily personal bests live locally (in the cloud-saved doc) |
+| Achievements | Local only (part of the cloud-saved progress doc); `server.js` is a standalone Node host, not a platform game script, so there is no server-owned unlock path |
 
-**Used (dev backend, no launch token).** When served by its own `server.js`, the game probes
-`GET /api/v1/time` once; a finite epoch gates `app.hosted` and enables the replay-validated
-ranked daily: `POST /api/v1/score` revalidates the command log server-side, and
-`GET /api/v1/leaderboard?board=daily&seed=` returns the seed-filtered top 50. Achievements
-mirror idempotently via `GET/POST /api/v1/achievements`.
+Account strings (sign-in, invite, toasts) are localized in the nine locales (`sh-strings.js`).
 
-**Not used.** No presence, party, chat, matchmaking or real-time multiplayer; clients can
+**Standalone (no launch token).** The client makes no request to any `/api` or `/ws` route:
+device clock, daily bests and achievements kept locally, results read "Score kept on this
+device". `server.js` still implements time, daily, replay-validated score, leaderboard and
+achievements routes, exercised only by `tests/run-tests.mjs`.
+
+**Not used.** No platform sessions, presence, party, chat, matchmaking, friend-picker invites,
+replays or real-time multiplayer (single-player game, no platform game script); clients can
 never submit scores to a platform leaderboard (script/elo-owned, read-only by design). With
 no launch token and no dev backend the game runs identically: the Daily uses the local UTC
 date, progression stays in `localStorage`, and results say "Leaderboard unavailable — score
@@ -553,8 +566,8 @@ ephemeral port (the repo's `server.js` is the platform script, not a dev server)
 headless Chrome via `playwright-core`, clicking only visible controls — buttons by accessible
 name, `.lp-letter` biscuits by index, real key presses. It imports `JOURNEY` solely to know
 *which* biscuits to click, and runs twice: 1280×800, then a fresh 390×844 touch context. Any
-console error, warning or `pageerror` that is not documented GPU noise or the expected `/api/v1/time` 404
-fails the run.
+console error, warning or `pageerror` that is not documented GPU noise fails the run, and so
+does any same-origin `/api` or `/ws` request during the standalone pass.
 
 ---
 
@@ -566,9 +579,9 @@ replay across many seeds (property loop); a malformed-command fuzz that must nei
 hang; that command stamps drive the round clock and par-time bonus; that practice seeds
 round-trip through `descriptorFromSeed`; that `validateContent()` passes every authored stage and
 a sample of dailies; idempotent duplicate-command rejection; envelope hashes and terminal result;
-platform adapter behavior (cloud zip round-trips and is structurally valid, JWT `sub`/`game_scope`
-decode, Bearer on every call, token re-mint swap, nickname + `Player `+id8 fallback, no-token
-inertness); client/server daily parity; that score validation accepts a valid replay and rejects a
+platform adapter behavior over the real SDK with a stubbed fetch (fragment token read + strip,
+Bearer, profile nickname, `game:<slug>` cloud-save round-trip, settings KV changed-key patch,
+invite link, zero fetches standalone, sign-in offered on the platform host); client/server daily parity; that score validation accepts a valid replay and rejects a
 tampered one; that the server blocks path traversal and 404s as JSON; and the graphics model —
 `detectPreset` on sample GPU strings (software → Low, discrete/Apple M → High, touch capped at
 Balanced), `resolve()` with presets, overrides, invalid values and the 50–200% scale clamp,
@@ -635,9 +648,8 @@ cheaper and sharper as procedural geometry driven by the theme palette.
 ## 16. Known limitations
 
 1. **English only.** No i18n layer beyond the Graphics section's string table (§10).
-2. **No identity on the dev leaderboard.** Submissions to the local `server.js` board are
-   posted as `guest`, so it cannot distinguish players; "friends" is accepted as a query
-   parameter but filters nothing. On-platform the board is read-only, identity comes from the
+2. **No shared daily board standalone.** The client submits no scores (the `server.js` board
+   is test-only). On-platform the board is read-only, identity comes from the
    launch token (nickname shown, progress cloud-saved), and client score submission is
    impossible by design.
 3. **Practice seeds churn by the minute.** `derivePractice` is seeded on
