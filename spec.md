@@ -280,6 +280,10 @@ first control, and restore focus to the invoking element on close.
   within 34dvh; actions become a wrapping row in the bottom thumb zone.
 - **Landscape mobile (≤900 px):** three narrow columns, 48 px biscuits, so the tray is never
   pushed under browser chrome.
+- **Large screens (>1600×1000):** `ui-scale.js` sets `--ui-scale` (`min(w/1600, h/1000)`, max 2.5)
+  and the whole DOM layer (`#ui-root`, plus the FPS readout) zooms by it, so panels, rails, HUD and
+  tray keep their 1600×1000 proportions; the full-viewport 3D canvas is not zoomed. vw/vh lengths
+  inside the UI are divided by the scale.
 
 **Safe areas.** `--lp-safe-*` read `env(safe-area-inset-*)` and pad `.lp-play`, `.lp-panel` and
 `.lp-compat`; `index.html` sets `viewport-fit=cover`. Panels are `max-height: 100dvh` with

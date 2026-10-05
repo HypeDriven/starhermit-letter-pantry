@@ -57,6 +57,9 @@ body.lp-reduced-motion * { transition: none !important; animation: none !importa
 }
 
 #ui-root { position: absolute; inset: 0; pointer-events: none; }
+/* Large screens: the DOM UI layer zooms by --ui-scale (ui-scale.js; 1 at or below
+   1600x1000); the full-viewport 3D canvas stays unzoomed. vw/vh lengths are divided. */
+#ui-root, .lp-fps { zoom: var(--ui-scale, 1); }
 #ui-root > * { pointer-events: auto; }
 
 .lp-screen-root { position: absolute; inset: 0; display: flex; }
@@ -75,8 +78,8 @@ body.lp-reduced-motion * { transition: none !important; animation: none !importa
   border: 2px solid var(--lp-accent-dark);
   border-radius: 14px;
   padding: calc(1.5em + var(--lp-safe-top)) calc(2em + var(--lp-safe-right)) calc(1.5em + var(--lp-safe-bottom)) calc(2em + var(--lp-safe-left));
-  max-width: min(70ch, 92vw);
-  max-height: 100dvh;
+  max-width: min(70ch, calc(92vw / var(--ui-scale, 1)));
+  max-height: calc(100dvh / var(--ui-scale, 1));
   overflow-y: auto;
   box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
 }
@@ -154,9 +157,10 @@ body.lp-reduced-motion * { transition: none !important; animation: none !importa
 .lp-mode-card p { margin: 0.3em 0; }
 .lp-mode-meta { font-size: 0.85em; opacity: 0.75; }
 
-.lp-stage-scroll { max-height: 50dvh; overflow-y: auto; }
+.lp-stage-scroll { max-height: calc(50dvh / var(--ui-scale, 1)); overflow-y: auto; }
 .lp-stage-list { list-style: none; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 0.5em; }
-.lp-stage { width: 100%; }
+.lp-journey { width: 70ch; box-sizing: border-box; }
+.lp-stage { width: 100%; padding: 0.4em 0.6em; }
 .lp-stage-done { border-color: var(--lp-accent); color: var(--lp-accent); }
 .lp-stage-tier { display: block; font-size: 0.75em; opacity: 0.7; }
 
@@ -276,7 +280,7 @@ body.lp-high-contrast .lp-letter { background: #fff; color: #000; border-color: 
 
 /* ------------------------------------------------------------------ results */
 
-.lp-results { min-width: min(480px, 90vw); }
+.lp-results { min-width: min(480px, calc(90vw / var(--ui-scale, 1))); }
 .lp-results-art {
   display: block;
   width: min(320px, 70%);
@@ -308,7 +312,7 @@ body.lp-high-contrast .lp-letter { background: #fff; color: #000; border-color: 
 .lp-gfx .lp-setting { flex-wrap: wrap; row-gap: 0.25em; }
 .lp-gfx .lp-setting select { max-width: 100%; }
 .lp-gfx-range { display: inline-flex; align-items: center; gap: 0.5em; white-space: nowrap; }
-.lp-gfx-range input[type=range] { width: min(160px, 38vw); }
+.lp-gfx-range input[type=range] { width: min(160px, calc(38vw / var(--ui-scale, 1))); }
 .lp-gfx-value { min-width: 3.2em; text-align: right; font-variant-numeric: tabular-nums; }
 .lp-gfx-summary { font-size: 0.85em; opacity: 0.85; margin: 0.6em 0 0.2em; overflow-wrap: anywhere; }
 .lp-gfx-note { font-size: 0.85em; color: var(--lp-danger); margin: 0.2em 0; }
@@ -340,7 +344,7 @@ body.lp-high-contrast .lp-letter { background: #fff; color: #000; border-color: 
   .lp-rail-left {
     grid-area: status;
     display: flex; gap: 1em; align-items: baseline;
-    padding: 0.5em 0.8em; max-height: 34dvh; overflow-y: auto;
+    padding: 0.5em 0.8em; max-height: calc(34dvh / var(--ui-scale, 1)); overflow-y: auto;
   }
   .lp-slots { flex-direction: row; flex-wrap: wrap; }
   .lp-rail-right { grid-area: actions; padding: 0.5em 0.8em; }
@@ -355,7 +359,7 @@ body.lp-high-contrast .lp-letter { background: #fff; color: #000; border-color: 
   .lp-rail { font-size: 0.82em; padding: 0.5em; }
   /* the action rail is bounded by the viewport height and scrolls inside
      itself; buttons keep full 44px targets in two columns */
-  .lp-rail-right { align-self: stretch; max-height: calc(100dvh - 1.2em - var(--lp-safe-top) - var(--lp-safe-bottom)); overflow-y: auto; }
+  .lp-rail-right { align-self: stretch; max-height: calc(calc(100dvh / var(--ui-scale, 1)) - 1.2em - var(--lp-safe-top) - var(--lp-safe-bottom)); overflow-y: auto; }
   .lp-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 0.35em; }
   .lp-actions .lp-btn { min-height: 44px; padding: 0.3em 0.4em; font-size: 0.95em; }
   .lp-status { font-size: 0.9em; }
@@ -369,7 +373,7 @@ body.lp-high-contrast .lp-letter { background: #fff; color: #000; border-color: 
 .lp-toast {
   position: fixed; left: 50%; transform: translateX(-50%);
   bottom: calc(16px + var(--lp-safe-bottom)); z-index: 60;
-  max-width: min(92vw, 420px); margin: 0; padding: 0.6em 1em; border-radius: 10px;
+  max-width: min(calc(92vw / var(--ui-scale, 1)), 420px); margin: 0; padding: 0.6em 1em; border-radius: 10px;
   background: var(--lp-panel); color: var(--lp-text); border: 1px solid var(--lp-accent);
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.45); text-align: center;
 }
