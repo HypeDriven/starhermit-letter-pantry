@@ -276,7 +276,7 @@ export class UI {
       const doneStage = prog.completedStages.includes(stage.id);
       const li = el('li', {},
         el('button', {
-          class: 'lp-stage' + (doneStage ? ' lp-stage-done' : ''),
+          class: 'lp-btn lp-stage' + (doneStage ? ' lp-stage-done' : ''),
           disabled: unlocked ? null : '',
           'aria-label': `Stage ${i + 1}: ${stage.base}, ${stage.tier}${doneStage ? ', completed' : ''}${unlocked ? '' : ', locked'}`,
           onclick: () => unlocked && this.h.onPlayJourney(i),
@@ -284,7 +284,7 @@ export class UI {
       );
       list.append(li);
     });
-    const node = el('main', { class: 'lp-panel', role: 'main' },
+    const node = el('main', { class: 'lp-panel lp-journey', role: 'main' },
       el('h2', { text: 'Journey' }),
       el('p', { text: `${prog.completedStages.length} of ${JOURNEY.length} stages complete.` }),
       el('div', { class: 'lp-stage-scroll' }, list),
