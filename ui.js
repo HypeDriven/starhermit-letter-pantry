@@ -27,6 +27,11 @@ export function loadSettings() {
 }
 export function saveSettings(s) { saveJSON('settings', s); }
 
+// Opening a panel must show its top: clear any scroll left by focus or reuse.
+function resetScroll(root) {
+  for (const n of [root, ...root.querySelectorAll('*')]) if (n.scrollTop) n.scrollTop = 0;
+}
+
 function el(tag, attrs = {}, ...children) {
   const node = document.createElement(tag);
   for (const [k, v] of Object.entries(attrs)) {
@@ -159,7 +164,9 @@ export class UI {
     this.screenRoot.innerHTML = '';
     this.screenRoot.append(node);
     const focusable = node.querySelector('[data-autofocus]') || node.querySelector('button');
-    if (focusable) focusable.focus();
+    // preventScroll: a Done button at the bottom must not scroll the heading away.
+    if (focusable) focusable.focus({ preventScroll: true });
+    resetScroll(node);
     this._stopTimer();
   }
 
@@ -523,7 +530,9 @@ export class UI {
     }, node);
     this.root.append(wrap);
     const focusable = node.querySelector('[data-autofocus]') || node.querySelector('button');
-    if (focusable) focusable.focus();
+    // preventScroll: a Done button at the bottom must not scroll the heading away.
+    if (focusable) focusable.focus({ preventScroll: true });
+    resetScroll(wrap);
   }
 
   closeOverlay() {

@@ -268,7 +268,8 @@ boot ─▶ title ─┬─▶ mode-select ─┬─▶ journey ──┐
 Every transition is logged by `setState(next, reason)` with exactly one owner. `error` is
 reachable from any state via the global handler and returns to the title with the round saved.
 Overlays (`pause`, `settings`, `help`) are `role="dialog" aria-modal="true"`, autofocus their
-first control, and restore focus to the invoking element on close.
+first control without scrolling (they open at the top, heading visible), and restore focus to
+the invoking element on close.
 
 **Layout.** The play screen is a CSS grid, `left | tray | right`:
 
