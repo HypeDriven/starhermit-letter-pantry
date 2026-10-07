@@ -563,6 +563,14 @@ export class UI {
     this.announce('Paused.');
   }
 
+  /** Results-screen leaderboard line: key in lbPosting/lbRank/lbPosted/lbNotPosted, or null to hide. */
+  setLeaderboardLine(key, rank) {
+    const line = typeof document !== 'undefined' ? document.getElementById('results-lb') : null;
+    if (!line) return;
+    line.hidden = !key;
+    line.textContent = key ? String(this.shT[key] || '').replace('{rank}', String(rank)) : '';
+  }
+
   showResults(result) {
     this._stopTimer();
     const { outcome, score, progressionText, newAchievements, sessionMeta, allowNext } = result;
@@ -590,6 +598,7 @@ export class UI {
             el('ul', {}, newAchievements.map((a) => el('li', {}, `🏆 ${a.name} — ${a.desc}`))))
         : null,
       result.comparison ? el('p', { class: 'lp-progress-note', text: result.comparison }) : null,
+      el('p', { class: 'lp-progress-note', id: 'results-lb', role: 'status', hidden: '' }),
       el('div', { class: 'lp-row' },
         el('button', { class: 'lp-btn lp-btn-primary', onclick: () => this.h.onRetry() }, 'Retry'),
         allowNext ? el('button', { class: 'lp-btn', onclick: () => this.h.onNext() }, 'Next stage') : null,

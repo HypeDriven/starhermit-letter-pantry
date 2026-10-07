@@ -228,12 +228,12 @@ async function showResults() {
     const bestText = `Your best today: ${best.score}.`;
 
     if (platform.active) {
-      // Read-only platform board; clients can never submit scores.
+      // Top entry of the game's default platform board (the high-score board).
       try {
         const board = await platform.fetchLeaderboard();
         if (board && board.entries && board.entries.length) {
           const top = board.entries[0];
-          comparison = `Daily board: top ${top.name} ${top.score} (${board.entries.length} shown). ${bestText}`;
+          comparison = `High-score board: top ${top.name} ${top.score} (${board.entries.length} shown). ${bestText}`;
         } else {
           comparison = `Global board unavailable — score kept locally. ${bestText}`;
         }
@@ -254,6 +254,17 @@ async function showResults() {
     comparison,
     allowNext: app.meta.mode === 'journey' && outcome === 'completed' &&
       descriptor.index != null && descriptor.index + 1 < content.JOURNEY.length,
+  });
+  postHighScore(snap.score.total);
+}
+
+// Signed in, every finished round except Learn lessons posts its total to the
+// platform high-score board; the results screen shows the rank line.
+function postHighScore(total) {
+  if (!platform.active || app.meta.mode === 'learn') { app.ui.setLeaderboardLine(null); return; }
+  app.ui.setLeaderboardLine('lbPosting');
+  platform.postHighScore(Math.max(0, Math.round(total))).then((r) => {
+    app.ui.setLeaderboardLine(!r.posted ? 'lbNotPosted' : r.rank ? 'lbRank' : 'lbPosted', r.rank);
   });
 }
 

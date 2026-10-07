@@ -128,7 +128,24 @@ export function createPlatform({ sh: shDep, onStatus } = {}) {
     signIn() { const sh = S(); return !!sh && sh.signIn(); },
     inviteLink() { return this.active ? S().inviteLink() : null; },
 
-    // -- Leaderboard (read-only; clients can never submit scores) -----------
+    // -- High-score board (score-script.js) --------------------------------
+    // Post a finished round's total via StarHermit.submitScores; resolves
+    // {posted, rank} — the player's rank on the `high-score` board, or null.
+    async postHighScore(total) {
+      const sh = S();
+      if (!this.active || !sh) return { posted: false, rank: null };
+      try {
+        const keys = await sh.submitScores({ 'high-score': total });
+        if (!keys || keys.indexOf('high-score') < 0) return { posted: false, rank: null };
+        try {
+          const r = await sh.leaderboard('high-score', { pageSize: 100 });
+          const me = ((r && r.items) || []).find((i) => i.userId === sh.userId);
+          return { posted: true, rank: me ? me.rank : null };
+        } catch { return { posted: true, rank: null }; }
+      } catch { return { posted: false, rank: null }; }
+    },
+
+    // -- Leaderboard (read-only reads of the game's default board) ----------
     async fetchLeaderboard() {
       if (!this.active) return null;
       const board = await S().leaderboard(null, { pageSize: LEADERBOARD_PAGE_SIZE });

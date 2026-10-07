@@ -26,7 +26,7 @@ hiding in that tray has been served.
 | `index.html` | Shell: canvas `#game-canvas`, `#ui-root`, import map (`three`, `three/addons/`), ES-module bootstrap, `THREE` global bridge |
 | `bootstrap.js` | App state machine, module wiring, progression, achievements, local daily bests, cloud-sync hooks, error recovery |
 | `starhermit-sdk.js` | Shared StarHermit client (unmodified copy) |
-| `platform.js` | Adapter over the SDK: hosted flag, nickname, cloud-save mirror + sync status, settings KV, key bindings, sign-in/invite, read-only leaderboard |
+| `platform.js` | Adapter over the SDK: hosted flag, nickname, cloud-save mirror + sync status, settings KV, key bindings, sign-in/invite, high-score posting, leaderboard reads |
 | `sh-strings.js` | Account strings in the nine locales |
 | `rules.js` | Pure deterministic rules engine: RNG, commands, scoring, undo, serialization, replay. No DOM, no timers |
 | `content.js` | Versioned content: dictionary-derived stages, lessons, journey table, challenges, daily generator, themes, achievements, offline validator |
@@ -38,6 +38,7 @@ hiding in that tray has been served.
 | `vendor/` | `three.module.min.js` (r170) and `three/addons/` (r170 post-processing passes, shaders, `RoomEnvironment`) |
 | `audio.js` | WebAudio: sample one-shots from `sfx/`, synth fallbacks, three buses, adaptive music bed |
 | `words.js` | The shipped dictionary (`WORDS`, `WORD_SET`) |
+| `score-script.js` | StarHermit platform script (`server=score-script.js`): range-checks a finished round's total and posts it to the `high-score` leaderboard (canonical copy in the games repo's `tools/score-script.js`) |
 | `server.js` | Local dev backend (static hosting + `/api/v1/*`: time, daily, score, leaderboard, achievements; the client no longer calls these); plain Node script, not a platform game script |
 | `style.css` | Layout, palette, responsive breakpoints, accessibility classes |
 | `assets/` | `title-backdrop.webp`, `results-tray.webp` |
@@ -490,7 +491,7 @@ The remaining work is tracked in §17.
 ## 12. StarHermit integration
 
 Manifest (`starhermit.txt`): `name=Letter Pantry`, `launch=index.html`, `owner=<uuid>`,
-`server=server.js`, `cover=cover.jpg`. Conventions per <https://wiki.starhermit.com/>.
+`server=score-script.js`, `cover=cover.jpg`. Conventions per <https://wiki.starhermit.com/>.
 
 Manifest also lists one `control.<action>=<Code>[+<Code>] | <Label>` line per keyboard action
 (next, prev, submit, unpick, clear, pause, undo, hint, camera).
@@ -509,10 +510,11 @@ modules) via the adapter `platform.js`. Without a launch token nothing calls the
 | Settings KV | All preferences (volumes, graphics, reduced motion, high contrast, larger text, colour-vision palette, left-handed, haptics, tutorial prompts) are patched to the per-player settings store on change (changed keys only); at boot the stored values override local ones |
 | Controls | Keyboard input is routed by `event.code` through `StarHermit.loadBindings()` (defaults = the manifest `control.*` lines); the Help "Keyboard" card lists the effective keys |
 | Invite link | Signed-in players get **Invite a friend** on the title, copying `StarHermit.inviteLink()` with a confirmation toast |
-| Leaderboards | Read-only: the Daily results line shows the top entry of the game's first platform board when one exists (`StarHermit.leaderboard()`, names via profiles); otherwise only local records show. Daily personal bests live locally (in the cloud-saved doc) |
-| Achievements | Local only (part of the cloud-saved progress doc); `server.js` is a standalone Node host, not a platform game script, so there is no server-owned unlock path |
+| High-score board | Every finished round except Learn lessons posts its total through `StarHermit.submitScores` (a practice session whose `score-script.js` posts it to the `high-score` board: integer, higher is better, 0–20,000); the results screen then shows "Leaderboard rank: #N" (or posted / not posted) |
+| Leaderboard reads | The Daily results line shows the top entry of the game's default platform board (`StarHermit.leaderboard()`, names via profiles) as "High-score board: top …"; otherwise only local records show. Daily personal bests live locally (in the cloud-saved doc) |
+| Achievements | Local only (part of the cloud-saved progress doc); `score-script.js` only posts scores, so there is no server-owned unlock path |
 
-Account strings (sign-in, invite, toasts) are localized in the nine locales (`sh-strings.js`).
+Account strings (sign-in, invite, toasts, leaderboard line) are localized in the nine locales (`sh-strings.js`).
 
 **Standalone (no launch token).** The client makes no request to any `/api` or `/ws` route:
 device clock, daily bests and achievements kept locally, results read "Score kept on this
@@ -520,8 +522,8 @@ device". `server.js` still implements time, daily, replay-validated score, leade
 achievements routes, exercised only by `tests/run-tests.mjs`.
 
 **Not used.** No platform sessions, presence, party, chat, matchmaking, friend-picker invites,
-replays or real-time multiplayer (single-player game, no platform game script); clients can
-never submit scores to a platform leaderboard (script/elo-owned, read-only by design). With
+replays or real-time multiplayer (single-player game; the platform script only posts scores). Standalone, nothing is posted
+and the results screen shows no leaderboard line. With
 no launch token and no dev backend the game runs identically: the Daily uses the local UTC
 date, progression stays in `localStorage`, and results say "Leaderboard unavailable — score
 kept locally."
@@ -567,7 +569,7 @@ not eject a player mid-round) and offers a recoverable error screen for script e
 round first.
 
 **How the e2e drives the real UI.** `tests/e2e.mjs` starts its own `node:http` static server on an
-ephemeral port (the repo's `server.js` is the platform script, not a dev server) and drives
+ephemeral port (independent of the repo's `server.js` dev backend) and drives
 headless Chrome via `playwright-core`, clicking only visible controls — buttons by accessible
 name, `.lp-letter` biscuits by index, real key presses. It imports `JOURNEY` solely to know
 *which* biscuits to click, and runs twice: 1280×800, then a fresh 390×844 touch context. Any
@@ -653,10 +655,9 @@ cheaper and sharper as procedural geometry driven by the theme palette.
 ## 16. Known limitations
 
 1. **English only.** No i18n layer beyond the Graphics section's string table (§10).
-2. **No shared daily board standalone.** The client submits no scores (the `server.js` board
-   is test-only). On-platform the board is read-only, identity comes from the
-   launch token (nickname shown, progress cloud-saved), and client score submission is
-   impossible by design.
+2. **No shared daily board standalone.** Standalone the client submits no scores (the `server.js`
+   board is test-only). On-platform, finished rounds post to the single `high-score` board;
+   there is no per-day platform board.
 3. **Practice seeds churn by the minute.** `derivePractice` is seeded on
    `floor(serverNow / 60000)`, so *Retry* within the same minute repeats the same tray while a
    retry across a minute boundary silently changes it.
