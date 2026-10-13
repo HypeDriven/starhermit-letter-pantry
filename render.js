@@ -826,9 +826,9 @@ export function createRenderer(canvas, opts = {}) {
       ? [state.q.ao, state.q.bloom, state.q.grade, state.q.antialias, size[0], size[1], pixelRatio].join('|') : 'none';
     if (key !== postKey) { postKey = key; buildPost(size[0], size[1], pixelRatio); }
     if (composer) {
-      try { composer.render(dt); } catch { postFailed = true; composer.dispose(); composer = null; renderer.render(scene, camera); }
+      try { (globalThis.GameOptions ? globalThis.GameOptions.draw(composer.renderer, () => composer.render(dt)) : composer.render(dt)); } catch { postFailed = true; composer.dispose(); composer = null; (globalThis.GameOptions ? globalThis.GameOptions.draw(renderer, () => renderer.render(scene, camera)) : renderer.render(scene, camera)); }
     } else {
-      renderer.render(scene, camera);
+      (globalThis.GameOptions ? globalThis.GameOptions.draw(renderer, () => renderer.render(scene, camera)) : renderer.render(scene, camera));
     }
   }
 

@@ -60,7 +60,7 @@ export class PantryAudio {
         const g = this.ctx.createGain();
         g.gain.value = this.volumes[name];
         g.connect(master);
-        this.buses[name] = g;
+        this.buses[name] = (globalThis.GameOptions ? globalThis.GameOptions.tagBus(g, name) : g);
       }
       this.started = true;
       this._startAmbience();
@@ -101,7 +101,7 @@ export class PantryAudio {
     const name = PantryAudio.SAMPLES[eventName];
     const entry = name ? this._loadSample(name) : null;
     if (entry && typeof entry === 'object' && typeof entry.getChannelData === 'function') {
-      const src = this.ctx.createBufferSource();
+      const src = (globalThis.GameOptions ? globalThis.GameOptions.trackSource(this.ctx.createBufferSource(), null) : this.ctx.createBufferSource());
       src.buffer = entry;
       src.connect(this.buses.effects);
       src.start();
@@ -117,7 +117,7 @@ export class PantryAudio {
   _blip(bus, { freq = 440, dur = 0.08, type = 'triangle', gain = 0.25, slide = 0 }) {
     if (!this.started || !this.ctx) return;
     const t = this.ctx.currentTime;
-    const osc = this.ctx.createOscillator();
+    const osc = (globalThis.GameOptions ? globalThis.GameOptions.trackSource(this.ctx.createOscillator(), bus) : this.ctx.createOscillator());
     const env = this.ctx.createGain();
     osc.type = type;
     osc.frequency.setValueAtTime(this._pitch(freq), t);
@@ -132,7 +132,7 @@ export class PantryAudio {
   _thock(freq = 180, dur = 0.12, gain = 0.3) {
     if (!this.started || !this.ctx) return;
     const t = this.ctx.currentTime;
-    const osc = this.ctx.createOscillator();
+    const osc = (globalThis.GameOptions ? globalThis.GameOptions.trackSource(this.ctx.createOscillator(), null) : this.ctx.createOscillator());
     const env = this.ctx.createGain();
     osc.type = 'sine';
     osc.frequency.setValueAtTime(this._pitch(freq), t);
@@ -210,7 +210,7 @@ export class PantryAudio {
     const buffer = this.ctx.createBuffer(1, len, this.ctx.sampleRate);
     const data = buffer.getChannelData(0);
     for (let i = 0; i < len; i++) data[i] = (this.rng() * 2 - 1) * 0.5;
-    const src = this.ctx.createBufferSource();
+    const src = (globalThis.GameOptions ? globalThis.GameOptions.trackSource(this.ctx.createBufferSource(), null) : this.ctx.createBufferSource());
     src.buffer = buffer; src.loop = true;
     const filter = this.ctx.createBiquadFilter();
     filter.type = 'lowpass'; filter.frequency.value = 320; filter.Q.value = 0.4;
@@ -237,7 +237,7 @@ export class PantryAudio {
       const note = chord[step % chord.length] * (step % 2 ? 1 : 0.5);
       const dur = 0.5 + this.intensity * 0.1;
       const t = this.ctx.currentTime;
-      const osc = this.ctx.createOscillator();
+      const osc = (globalThis.GameOptions ? globalThis.GameOptions.trackSource(this.ctx.createOscillator(), null) : this.ctx.createOscillator());
       const env = this.ctx.createGain();
       osc.type = 'sine';
       osc.frequency.value = note;
