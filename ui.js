@@ -6,6 +6,7 @@ import { loadJSON, saveJSON } from './session.js';
 import { PRESETS, CATEGORIES, presetTier, choosePreset } from './gfx.js';
 import { pickLocale, gfxT } from './gfx-i18n.js';
 import { shStrings } from './sh-strings.js';
+import { T, N, getLang } from './i18n.js';
 import { ACHIEVEMENTS, JOURNEY, CHALLENGES, LESSONS, PRACTICE_DIFFICULTIES, THEMES, CONTENT_VERSION } from './content.js';
 
 export const DEFAULT_SETTINGS = {
@@ -32,10 +33,34 @@ function resetScroll(root) {
   for (const n of [root, ...root.querySelectorAll('*')]) if (n.scrollTop) n.scrollTop = 0;
 }
 
+// Localized text: `t` (an English key, or a thunk) with optional `tv` vars sets
+// textContent; `at`/`atv` set aria-label. Such nodes are remembered and
+// re-rendered in place by relabelAll() when the game language changes, so open
+// screens and dialogs (and the shared sections mounted in Settings) survive.
+const LOC = new Set();
+const resolveVars = (vars) => vars && Object.fromEntries(Object.entries(vars).map(([k, v]) => [k, typeof v === 'function' ? v() : v]));
+const locText = (key, vars) => (typeof key === 'function' ? key() : T(key, resolveVars(vars)));
+function applyLoc(node) {
+  const l = node.__loc;
+  if (l.t != null) node.textContent = locText(l.t, l.tv);
+  if (l.at != null) node.setAttribute('aria-label', locText(l.at, l.atv));
+}
+export function relabelAll() {
+  for (const node of LOC) {
+    if (!node.isConnected) { LOC.delete(node); continue; }
+    applyLoc(node);
+  }
+}
+
 function el(tag, attrs = {}, ...children) {
   const node = document.createElement(tag);
+  if (attrs.t != null || attrs.at != null) {
+    node.__loc = { t: attrs.t, tv: attrs.tv, at: attrs.at, atv: attrs.atv };
+    LOC.add(node);
+  }
   for (const [k, v] of Object.entries(attrs)) {
     if (v === null || v === undefined) continue;
+    if (k === 't' || k === 'tv' || k === 'at' || k === 'atv') continue;
     if (k === 'class') node.className = v;
     else if (k === 'text') node.textContent = v;
     else if (k.startsWith('on')) node.addEventListener(k.slice(2), v);
@@ -50,6 +75,7 @@ function el(tag, attrs = {}, ...children) {
     node.append(c);
   };
   children.forEach(appendChild);
+  if (node.__loc) applyLoc(node);
   return node;
 }
 
@@ -68,6 +94,32 @@ export function keyLabel(code) {
   if (/^Key[A-Z]$/.test(code)) return code.slice(3);
   if (/^Digit\d$/.test(code)) return code.slice(5);
   return code;
+}
+
+// gfx.js describe() builds the cost summary from English parts; translate them here.
+const SUMMARY_PARTS = [N('no shadows'), N('full ambient occlusion'), N('ambient occlusion'), N('bloom'), N('reflections'), N('no anti-aliasing')];
+function localizeSummary(summary) {
+  return String(summary || '').split(' · ').map((part) => {
+    const m = /^(\d+)² shadows$/.exec(part);
+    if (m) return T(N('{n}² shadows'), { n: m[1] });
+    return SUMMARY_PARTS.includes(part) ? T(part) : part;
+  }).join(' · ');
+}
+
+const DIFFICULTY_LABEL = { easy: N('Easy'), medium: N('Medium'), hard: N('Hard') };
+
+/**
+ * Round title in the current language. meta.modeKey = [key, vars] (vars may hold
+ * content keys under `tier`/`challenge`/`lesson`, translated here); older
+ * snapshots only carry the English meta.modeLabel.
+ */
+export function modeLabel(meta) {
+  if (!meta) return '';
+  if (!meta.modeKey) return meta.modeLabel || '';
+  const [key, vars = {}] = meta.modeKey;
+  const v = { ...vars };
+  for (const k of ['tier', 'challenge', 'lesson', 'difficulty']) if (v[k] != null) v[k] = T(v[k]);
+  return T(key, v);
 }
 
 function fmtTime(ms) {
@@ -90,7 +142,7 @@ export class UI {
     this.timerId = null;
     this.playerStatus = ''; // platform profile name + cloud sync status
     this.account = { canSignIn: false, canInvite: false }; // StarHermit title buttons
-    this.shT = shStrings(typeof navigator !== 'undefined' ? (navigator.languages || [navigator.language]) : []);
+
     this.setBindings(DEFAULT_BINDINGS);
     this.applySettingsClasses();
 
@@ -103,10 +155,27 @@ export class UI {
     document.addEventListener('keydown', (e) => this._onKey(e));
   }
 
-  announce(msg, assertive = false) {
+  /** StarHermit account strings in the current game language. */
+  get shT() { return shStrings([getLang()]); }
+
+  /** Announce an English key (translated) or already-localized text. */
+  announce(msg, assertive = false, vars) {
+    const text = T(msg, vars);
     const region = assertive ? this.liveAssert : this.livePolite;
     region.textContent = '';
-    requestAnimationFrame(() => { region.textContent = msg; });
+    requestAnimationFrame(() => { region.textContent = text; });
+  }
+
+  /**
+   * The game language changed: re-render every remembered label in place, then
+   * the parts computed from game state (play HUD, slots, lesson box).
+   */
+  relocalize() {
+    relabelAll();
+    const o = document.getElementById('lp-overlay');
+    if (o) { const h = o.querySelector('h2'); if (h) o.setAttribute('aria-label', h.textContent); }
+    if (this.screen === 'play' && this.session) this.updatePlay(this.session.snapshot(), this.session.actions());
+    if (this.toastEl && !this.toastEl.hidden && this._toastKey) this.toastEl.textContent = T(this._toastKey);
   }
 
   // Platform profile name + sync status, shown on the title screen and in the
@@ -134,7 +203,8 @@ export class UI {
   }
 
   toast(msg) {
-    this.toastEl.textContent = msg;
+    this._toastKey = msg;
+    this.toastEl.textContent = T(msg);
     this.toastEl.hidden = false;
     clearTimeout(this._toastTimer);
     this._toastTimer = setTimeout(() => { this.toastEl.hidden = true; }, 3200);
@@ -190,7 +260,7 @@ export class UI {
       case 'pause': cmd(null); this.showPause(); break;
       case 'undo': cmd({ type: 'undo' }); break;
       case 'hint': cmd({ type: 'hint' }); break;
-      case 'camera': e.preventDefault(); this.h.onCameraReset && this.h.onCameraReset(); this.announce('Camera reset.'); break;
+      case 'camera': e.preventDefault(); this.h.onCameraReset && this.h.onCameraReset(); this.announce(N('Camera reset.')); break;
       case 'unpick': {
         const sel = this.session.state.selected;
         if (sel.length) cmd({ type: 'deselect', index: sel[sel.length - 1] });
@@ -210,19 +280,19 @@ export class UI {
     const res = this.h.onCommand(cmd);
     if (res && !res.ok && res.reason !== 'duplicate') {
       const messages = {
-        'already-selected': 'That biscuit is already in your hand.',
-        'not-selected': 'That biscuit is not selected.',
-        'empty-selection': 'Pick some letters first.',
-        'too-short': 'Words need at least 3 letters.',
-        'already-found': 'You already found that word.',
-        'not-allowed': 'That tool is not available in this stage.',
-        'undo-unavailable': 'Undo is not allowed here.',
-        'nothing-to-undo': 'Nothing to undo.',
-        'no-hints': 'No hints left.',
-        'paused': 'Round is paused.',
-        'terminal': 'The round is over.',
+        'already-selected': N('That biscuit is already in your hand.'),
+        'not-selected': N('That biscuit is not selected.'),
+        'empty-selection': N('Pick some letters first.'),
+        'too-short': N('Words need at least 3 letters.'),
+        'already-found': N('You already found that word.'),
+        'not-allowed': N('That tool is not available in this stage.'),
+        'undo-unavailable': N('Undo is not allowed here.'),
+        'nothing-to-undo': N('Nothing to undo.'),
+        'no-hints': N('No hints left.'),
+        'paused': N('Round is paused.'),
+        'terminal': N('The round is over.'),
       };
-      this.announce(messages[res.reason] || 'That action is not available.', true);
+      this.announce(messages[res.reason] || N('That action is not available.'), true);
     }
   }
 
@@ -235,49 +305,49 @@ export class UI {
     const done = progression.completedStages.length;
     const node = el('main', { class: 'lp-title lp-panel', role: 'main' },
       el('h1', { class: 'lp-logo', text: 'Letter Pantry' }),
-      el('p', { class: 'lp-tagline', text: 'Spell every word hiding in the biscuit tray.' }),
-      el('nav', { class: 'lp-title-nav', 'aria-label': 'Main menu' },
-        el('button', { class: 'lp-btn lp-btn-primary lp-btn-big', 'data-autofocus': '', onclick: () => this.showModeSelect() }, 'Play'),
-        hasSnapshot ? el('button', { class: 'lp-btn', onclick: () => this.h.onResume() }, 'Resume saved round') : null,
-        el('button', { class: 'lp-btn', onclick: () => this.h.onPlayDaily() }, `Daily Pantry — ${dailyDate}`),
-        el('button', { class: 'lp-btn', onclick: () => this.showJourney() }, `Journey (${done}/${JOURNEY.length})`),
-        el('button', { class: 'lp-btn', onclick: () => this.showHelp() }, 'How to play'),
-        el('button', { class: 'lp-btn', onclick: () => this.showSettings() }, 'Settings'),
+      el('p', { class: 'lp-tagline', t: 'Spell every word hiding in the biscuit tray.' }),
+      el('nav', { class: 'lp-title-nav', at: 'Main menu' },
+        el('button', { class: 'lp-btn lp-btn-primary lp-btn-big', 'data-autofocus': '', onclick: () => this.showModeSelect(), t: 'Play' }),
+        hasSnapshot ? el('button', { class: 'lp-btn', onclick: () => this.h.onResume(), t: 'Resume saved round' }) : null,
+        el('button', { class: 'lp-btn', onclick: () => this.h.onPlayDaily(), t: 'Daily Pantry — {date}', tv: { date: dailyDate } }),
+        el('button', { class: 'lp-btn', onclick: () => this.showJourney(), t: 'Journey ({done}/{total})', tv: { done, total: JOURNEY.length } }),
+        el('button', { class: 'lp-btn', onclick: () => this.showHelp(), t: 'How to play' }),
+        el('button', { class: 'lp-btn', onclick: () => this.showSettings(), t: 'Settings' }),
       ),
       this.playerStatus ? el('p', { class: 'lp-player-status', id: 'lp-player-status', text: this.playerStatus }) : null,
       (this.account.canSignIn || this.account.canInvite) ? el('div', { class: 'lp-account' },
-        this.account.canSignIn ? el('button', { class: 'lp-btn', id: 'lp-signin', onclick: () => this.h.onSignIn && this.h.onSignIn() }, this.shT.signIn) : null,
-        this.account.canInvite ? el('button', { class: 'lp-btn', id: 'lp-invite', onclick: () => this.h.onInvite && this.h.onInvite() }, this.shT.invite) : null,
+        this.account.canSignIn ? el('button', { class: 'lp-btn', id: 'lp-signin', onclick: () => this.h.onSignIn && this.h.onSignIn(), t: () => this.shT.signIn }) : null,
+        this.account.canInvite ? el('button', { class: 'lp-btn', id: 'lp-invite', onclick: () => this.h.onInvite && this.h.onInvite(), t: () => this.shT.invite }) : null,
       ) : null,
-      el('p', { class: 'lp-version', text: `Content ${CONTENT_VERSION}` }),
+      el('p', { class: 'lp-version', t: 'Content {v}', tv: { v: CONTENT_VERSION } }),
     );
     this._setScreen('title', node);
   }
 
   showModeSelect() {
     const modeCard = (title, desc, meta, onGo, primary) => el('article', { class: 'lp-mode-card' },
-      el('h3', { text: title }),
-      el('p', { text: desc }),
-      el('p', { class: 'lp-mode-meta', text: meta }),
-      el('button', { class: 'lp-btn' + (primary ? ' lp-btn-primary' : ''), onclick: onGo }, 'Start'),
+      el('h3', { t: title }),
+      el('p', { t: desc }),
+      el('p', { class: 'lp-mode-meta', t: meta }),
+      el('button', { class: 'lp-btn' + (primary ? ' lp-btn-primary' : ''), onclick: onGo, t: 'Start' }),
     );
     const node = el('main', { class: 'lp-panel lp-modes', role: 'main' },
-      el('h2', { text: 'Choose a mode' }),
+      el('h2', { t: 'Choose a mode' }),
       el('div', { class: 'lp-mode-grid' },
-        modeCard('Journey', 'Authored stages that teach and test you, one mechanic at a time.', '42 stages · solo · unranked', () => this.showJourney(), true),
-        modeCard('Daily Pantry', 'One shared puzzle per UTC day. Same tray for everyone.', '1 round · ranked · ~3 min', () => this.h.onPlayDaily()),
-        modeCard('Practice', 'Relaxed round at your chosen difficulty. Undo allowed.', 'unranked · restartable', () => this.showPractice()),
-        modeCard('Challenge', 'Constrained rounds: move limits, speed targets, restricted tools.', '4 trials · unranked', () => this.showChallenges()),
-        modeCard('Learn', 'Interactive lessons. Each step asks you to perform the action yourself.', '3 lessons · unranked', () => this.showLearn()),
+        modeCard(N('Journey'), N('Authored stages that teach and test you, one mechanic at a time.'), N('42 stages · solo · unranked'), () => this.showJourney(), true),
+        modeCard(N('Daily Pantry'), N('One shared puzzle per UTC day. Same tray for everyone.'), N('1 round · ranked · ~3 min'), () => this.h.onPlayDaily()),
+        modeCard(N('Practice'), N('Relaxed round at your chosen difficulty. Undo allowed.'), N('unranked · restartable'), () => this.showPractice()),
+        modeCard(N('Challenge'), N('Constrained rounds: move limits, speed targets, restricted tools.'), N('4 trials · unranked'), () => this.showChallenges()),
+        modeCard(N('Learn'), N('Interactive lessons. Each step asks you to perform the action yourself.'), N('3 lessons · unranked'), () => this.showLearn()),
       ),
-      el('button', { class: 'lp-btn lp-back', onclick: () => this.h.onLeaveRound('to-title') }, 'Back'),
+      el('button', { class: 'lp-btn lp-back', onclick: () => this.h.onLeaveRound('to-title'), t: 'Back' }),
     );
     this._setScreen('modes', node);
   }
 
   showJourney() {
     const prog = this.h.getProgression();
-    const list = el('ol', { class: 'lp-stage-list', 'aria-label': 'Journey stages' });
+    const list = el('ol', { class: 'lp-stage-list', at: 'Journey stages' });
     JOURNEY.forEach((stage, i) => {
       const unlocked = i === 0 || prog.completedStages.includes(JOURNEY[i - 1].id);
       const doneStage = prog.completedStages.includes(stage.id);
@@ -285,42 +355,43 @@ export class UI {
         el('button', {
           class: 'lp-btn lp-stage' + (doneStage ? ' lp-stage-done' : ''),
           disabled: unlocked ? null : '',
-          'aria-label': `Stage ${i + 1}: ${stage.base}, ${stage.tier}${doneStage ? ', completed' : ''}${unlocked ? '' : ', locked'}`,
+          at: doneStage ? 'Stage {n}: {word}, {tier}, completed' : unlocked ? 'Stage {n}: {word}, {tier}' : 'Stage {n}: {word}, {tier}, locked',
+          atv: { n: i + 1, word: stage.base, tier: () => T(stage.tier) },
           onclick: () => unlocked && this.h.onPlayJourney(i),
-        }, `${i + 1}. ${stage.base.toUpperCase()} ${doneStage ? '✓' : ''} `, el('span', { class: 'lp-stage-tier', text: stage.tier })),
+        }, `${i + 1}. ${stage.base.toUpperCase()} ${doneStage ? '✓' : ''} `, el('span', { class: 'lp-stage-tier', t: stage.tier })),
       );
       list.append(li);
     });
     const node = el('main', { class: 'lp-panel lp-journey', role: 'main' },
-      el('h2', { text: 'Journey' }),
-      el('p', { text: `${prog.completedStages.length} of ${JOURNEY.length} stages complete.` }),
+      el('h2', { t: 'Journey' }),
+      el('p', { t: '{done} of {total} stages complete.', tv: { done: prog.completedStages.length, total: JOURNEY.length } }),
       el('div', { class: 'lp-stage-scroll' }, list),
-      el('button', { class: 'lp-btn lp-back', onclick: () => this.showModeSelect() }, 'Back'),
+      el('button', { class: 'lp-btn lp-back', onclick: () => this.showModeSelect(), t: 'Back' }),
     );
     this._setScreen('journey', node);
   }
 
   showPractice() {
     const node = el('main', { class: 'lp-panel', role: 'main' },
-      el('h2', { text: 'Practice' }),
-      el('p', { text: 'Pick a difficulty. Practice never affects ranked boards.' }),
+      el('h2', { t: 'Practice' }),
+      el('p', { t: 'Pick a difficulty. Practice never affects ranked boards.' }),
       el('div', { class: 'lp-row' },
         PRACTICE_DIFFICULTIES.map((d) =>
-          el('button', { class: 'lp-btn lp-btn-big', onclick: () => this.h.onPlayPractice(d) }, d[0].toUpperCase() + d.slice(1))),
+          el('button', { class: 'lp-btn lp-btn-big', onclick: () => this.h.onPlayPractice(d), t: DIFFICULTY_LABEL[d] })),
       ),
-      el('button', { class: 'lp-btn lp-back', onclick: () => this.showModeSelect() }, 'Back'),
+      el('button', { class: 'lp-btn lp-back', onclick: () => this.showModeSelect(), t: 'Back' }),
     );
     this._setScreen('practice', node);
   }
 
   showChallenges() {
     const node = el('main', { class: 'lp-panel', role: 'main' },
-      el('h2', { text: 'Challenges' }),
+      el('h2', { t: 'Challenges' }),
       el('ul', { class: 'lp-challenge-list' },
         CHALLENGES.map((c) => el('li', {},
           el('button', { class: 'lp-btn lp-challenge', onclick: () => this.h.onPlayChallenge(c.id) },
-            el('strong', { text: c.base.toUpperCase() }), ` — ${c.challenge}`)))),
-      el('button', { class: 'lp-btn lp-back', onclick: () => this.showModeSelect() }, 'Back'),
+            el('strong', { text: c.base.toUpperCase() }), ' — ', el('span', { t: c.challenge }))))),
+      el('button', { class: 'lp-btn lp-back', onclick: () => this.showModeSelect(), t: 'Back' }),
     );
     this._setScreen('challenges', node);
   }
@@ -328,12 +399,12 @@ export class UI {
   showLearn() {
     const tut = this.h.getTutorial();
     const node = el('main', { class: 'lp-panel', role: 'main' },
-      el('h2', { text: 'Learn' }),
+      el('h2', { t: 'Learn' }),
       el('ul', { class: 'lp-challenge-list' },
         LESSONS.map((l) => el('li', {},
           el('button', { class: 'lp-btn lp-challenge', onclick: () => this.h.onPlayLesson(l.id) },
-            `${l.title}${tut.completedLessons.includes(l.id) ? ' ✓' : ''}`)))),
-      el('button', { class: 'lp-btn lp-back', onclick: () => this.showModeSelect() }, 'Back'),
+            el('span', { t: l.title }), tut.completedLessons.includes(l.id) ? ' ✓' : '')))),
+      el('button', { class: 'lp-btn lp-back', onclick: () => this.showModeSelect(), t: 'Back' }),
     );
     this._setScreen('learn', node);
   }
@@ -346,39 +417,39 @@ export class UI {
     this.meta = meta; // {modeLabel, lesson?}
     const s = session.snapshot();
 
-    const objective = el('section', { class: 'lp-rail lp-rail-left', 'aria-label': 'Objective and word slots' },
-      el('h2', { class: 'lp-hud-heading', text: meta.modeLabel }),
+    const objective = el('section', { class: 'lp-rail lp-rail-left', at: 'Objective and word slots' },
+      el('h2', { class: 'lp-hud-heading', t: () => modeLabel(meta) }),
       el('p', { class: 'lp-objective', id: 'lp-objective' }),
-      el('div', { class: 'lp-slots', id: 'lp-slots', role: 'list', 'aria-label': 'Target words' }),
+      el('div', { class: 'lp-slots', id: 'lp-slots', role: 'list', at: 'Target words' }),
       el('p', { class: 'lp-bonus-count', id: 'lp-bonus' }),
       meta.lesson ? el('div', { class: 'lp-lesson-box', id: 'lp-lesson-box' },
-        el('h3', { text: meta.lesson.title }),
+        el('h3', { t: meta.lesson.title }),
         el('p', { id: 'lp-lesson-text' })) : null,
     );
 
-    const actions = el('section', { class: 'lp-rail lp-rail-right', 'aria-label': 'Actions and status' },
+    const actions = el('section', { class: 'lp-rail lp-rail-right', at: 'Actions and status' },
       el('div', { class: 'lp-status' },
-        el('p', { class: 'lp-score' }, 'Score: ', el('strong', { id: 'lp-score', text: '0' })),
+        el('p', { class: 'lp-score' }, el('span', { t: 'Score:' }), ' ', el('strong', { id: 'lp-score', text: '0' })),
         el('p', { class: 'lp-moves', id: 'lp-moves' }),
         el('p', { class: 'lp-time', id: 'lp-time' }),
         this.playerStatus ? el('p', { class: 'lp-player-status', id: 'lp-sync-status', text: this.playerStatus }) : null,
       ),
-      el('div', { class: 'lp-actions', role: 'group', 'aria-label': 'Round actions' },
-        this._actionBtn('Submit', 'submit', () => this.command({ type: 'submit' }), 'lp-btn-primary'),
-        this._actionBtn('Clear', 'clear', () => this.command({ type: 'clear' })),
-        this._actionBtn('Shuffle', 'shuffle', () => this.command({ type: 'shuffle' })),
-        this._actionBtn('Undo', 'undo', () => this.command({ type: 'undo' })),
-        this._actionBtn('Hint', 'hint', () => this.command({ type: 'hint' })),
-        el('button', { class: 'lp-btn', onclick: () => this.showPause() }, 'Pause (P)'),
+      el('div', { class: 'lp-actions', role: 'group', at: 'Round actions' },
+        this._actionBtn(N('Submit'), 'submit', () => this.command({ type: 'submit' }), 'lp-btn-primary'),
+        this._actionBtn(N('Clear'), 'clear', () => this.command({ type: 'clear' })),
+        this._actionBtn(N('Shuffle'), 'shuffle', () => this.command({ type: 'shuffle' })),
+        this._actionBtn(N('Undo'), 'undo', () => this.command({ type: 'undo' })),
+        this._actionBtn(N('Hint'), 'hint', () => this.command({ type: 'hint' })),
+        el('button', { class: 'lp-btn', id: 'lp-act-pause', onclick: () => this.showPause(), t: 'Pause ({key})', tv: { key: 'P' } }),
       ),
     );
 
-    const tray = el('section', { class: 'lp-tray', 'aria-label': 'Letter tray' },
-      el('div', { class: 'lp-current', id: 'lp-current', 'aria-label': 'Current word' }),
-      el('div', { class: 'lp-letters', id: 'lp-letters', role: 'group', 'aria-label': 'Letters' }),
+    const tray = el('section', { class: 'lp-tray', at: 'Letter tray' },
+      el('div', { class: 'lp-current', id: 'lp-current', at: 'Current word' }),
+      el('div', { class: 'lp-letters', id: 'lp-letters', role: 'group', at: 'Letters' }),
     );
 
-    const boardModel = el('div', { class: 'lp-sr-only', id: 'lp-board-model', 'aria-label': 'Board state summary' });
+    const boardModel = el('div', { class: 'lp-sr-only', id: 'lp-board-model', at: 'Board state summary' });
 
     const node = el('main', { class: 'lp-play', role: 'main' },
       objective, tray, actions, boardModel);
@@ -387,12 +458,12 @@ export class UI {
     this._buildLetterButtons(s);
     this.updatePlay(s, session.actions());
     this._startTimer();
-    this.announce(`${meta.modeLabel}. Find ${s.targets.length} words. Letters: ${s.letters.join(', ')}.`);
+    this.announce('{mode}. Find {n} words. Letters: {letters}.', false, { mode: modeLabel(meta), n: s.targets.length, letters: s.letters.join(', ') });
     if (meta.lesson) this._updateLesson();
   }
 
   _actionBtn(label, id, onclick, extra = '') {
-    return el('button', { class: `lp-btn ${extra}`, id: `lp-act-${id}`, onclick }, label);
+    return el('button', { class: `lp-btn ${extra}`, id: `lp-act-${id}`, onclick, t: label });
   }
 
   _buildLetterButtons(snapshot) {
@@ -401,7 +472,7 @@ export class UI {
     snapshot.letters.forEach((letter, i) => {
       const btn = el('button', {
         class: 'lp-letter', 'data-index': i, 'aria-pressed': 'false',
-        'aria-label': `Letter ${letter.toUpperCase()}`,
+        at: 'Letter {letter}', atv: { letter: letter.toUpperCase() },
         onclick: () => this._toggleLetter(i),
       }, letter.toUpperCase());
       // Arrow-key navigation among letters.
@@ -431,7 +502,11 @@ export class UI {
     if (wrap) {
       if (wrap.children.length !== snapshot.letters.length) this._buildLetterButtons(snapshot);
       [...wrap.children].forEach((btn, i) => {
-        if (btn.textContent.toLowerCase() !== snapshot.letters[i]) btn.textContent = snapshot.letters[i].toUpperCase();
+        if (btn.textContent.toLowerCase() !== snapshot.letters[i]) {
+          btn.textContent = snapshot.letters[i].toUpperCase();
+          btn.__loc.atv = { letter: snapshot.letters[i].toUpperCase() };
+          btn.setAttribute('aria-label', T('Letter {letter}', btn.__loc.atv));
+        }
         const sel = snapshot.selected.includes(i);
         btn.setAttribute('aria-pressed', sel ? 'true' : 'false');
         btn.classList.toggle('lp-letter-sel', sel);
@@ -455,13 +530,13 @@ export class UI {
           : t.split('').map((ch, p) => reveals.includes(p) ? ch.toUpperCase() : '_').join(' ');
         const li = el('div', {
           class: 'lp-slot' + (found ? ' lp-slot-found' : ''), role: 'listitem',
-          'aria-label': found ? `Found: ${t}` : `Unfound word, ${t.length} letters`,
+          'aria-label': found ? T('Found: {word}', { word: t }) : T('Unfound word, {n} letters', { n: t.length }),
         }, label);
         slots.append(li);
       }
     }
     const bonus = document.getElementById('lp-bonus');
-    if (bonus) bonus.textContent = `Bonus words found: ${snapshot.foundBonus.length}`;
+    if (bonus) bonus.textContent = T('Bonus words found: {n}', { n: snapshot.foundBonus.length });
 
     // Status.
     const score = document.getElementById('lp-score');
@@ -479,9 +554,10 @@ export class UI {
     // Concise textual board model.
     const model = document.getElementById('lp-board-model');
     if (model) {
-      model.textContent = `Tray letters: ${snapshot.letters.map((l) => l.toUpperCase()).join(' ')}. ` +
-        `Selected: ${word || 'none'}. Found ${snapshot.foundTargets.length} of ${snapshot.targets.length} target words. ` +
-        `Score ${snapshot.score.total}.`;
+      model.textContent = T('Tray letters: {letters}. Selected: {word}. Found {found} of {total} target words. Score {score}.', {
+        letters: snapshot.letters.map((l) => l.toUpperCase()).join(' '), word: word || T('none'),
+        found: snapshot.foundTargets.length, total: snapshot.targets.length, score: snapshot.score.total,
+      });
     }
     if (this.meta && this.meta.lesson) this._updateLesson();
   }
@@ -490,15 +566,15 @@ export class UI {
     if (!this.session) return;
     const snap = snapshot || this.session.snapshot();
     const timeEl = document.getElementById('lp-time');
-    if (timeEl) timeEl.textContent = `Time: ${fmtTime(this.session.elapsedMs())} (par ${fmtTime(snap.par.timeMs)})`;
+    if (timeEl) timeEl.textContent = T('Time: {time} (par {par})', { time: fmtTime(this.session.elapsedMs()), par: fmtTime(snap.par.timeMs) });
     const movesEl = document.getElementById('lp-moves');
     if (movesEl) {
       movesEl.textContent = snap.mechanics.moveLimit != null
-        ? `Moves: ${snap.movesUsed}/${snap.mechanics.moveLimit}`
-        : `Moves: ${snap.movesUsed}`;
+        ? T('Moves: {used}/{limit}', { used: snap.movesUsed, limit: snap.mechanics.moveLimit })
+        : T('Moves: {used}', { used: snap.movesUsed });
     }
     const obj = document.getElementById('lp-objective');
-    if (obj) obj.textContent = `Find all ${snap.targets.length} target words (${snap.foundTargets.length} found).`;
+    if (obj) obj.textContent = T('Find all {n} target words ({found} found).', { n: snap.targets.length, found: snap.foundTargets.length });
   }
 
   _updateLesson() {
@@ -507,10 +583,10 @@ export class UI {
     const text = document.getElementById('lp-lesson-text');
     if (!text || !tracker) return;
     if (tracker.done) {
-      text.textContent = 'Lesson complete! Finish the round or leave when ready.';
+      text.textContent = T('Lesson complete! Finish the round or leave when ready.');
     } else {
       const step = lesson.steps[tracker.stepIndex];
-      text.textContent = `Step ${tracker.stepIndex + 1}/${lesson.steps.length}: ${step.text}`;
+      text.textContent = T('Step {n}/{count}: {text}', { n: tracker.stepIndex + 1, count: lesson.steps.length, text: T(step.text) });
     }
   }
 
@@ -549,18 +625,18 @@ export class UI {
     this.session.pause('user');
     this.h.onPaused && this.h.onPaused();
     const node = el('div', { class: 'lp-panel lp-pause' },
-      el('h2', { text: 'Paused' }),
-      el('button', { class: 'lp-btn lp-btn-primary lp-btn-big', 'data-autofocus': '', onclick: () => { this.closeOverlay(); this.session.resume('user'); } }, 'Resume'),
+      el('h2', { t: 'Paused' }),
+      el('button', { class: 'lp-btn lp-btn-primary lp-btn-big', 'data-autofocus': '', onclick: () => { this.closeOverlay(); this.session.resume('user'); }, t: 'Resume' }),
       el('div', { class: 'lp-pause-grid' },
-        el('button', { class: 'lp-btn', onclick: () => this.showSettings(true) }, 'Audio & graphics'),
-        el('button', { class: 'lp-btn', onclick: () => this.showSettings(true) }, 'Accessibility'),
-        el('button', { class: 'lp-btn', onclick: () => this.showHelp(true) }, 'Help'),
-        el('button', { class: 'lp-btn lp-btn-danger', onclick: () => { this.closeOverlay(); this.h.onLeaveRound('pause'); } }, 'Leave round'),
+        el('button', { class: 'lp-btn', onclick: () => this.showSettings(true), t: 'Audio & graphics' }),
+        el('button', { class: 'lp-btn', onclick: () => this.showSettings(true), t: 'Accessibility' }),
+        el('button', { class: 'lp-btn', onclick: () => this.showHelp(true), t: 'Help' }),
+        el('button', { class: 'lp-btn lp-btn-danger', onclick: () => { this.closeOverlay(); this.h.onLeaveRound('pause'); }, t: 'Leave round' }),
       ),
-      el('button', { class: 'lp-btn lp-back', onclick: () => { this.closeOverlay(); this.session.resume('user'); } }, 'Back to game'),
+      el('button', { class: 'lp-btn lp-back', onclick: () => { this.closeOverlay(); this.session.resume('user'); }, t: 'Back to game' }),
     );
     this._openOverlay('pause', node);
-    this.announce('Paused.');
+    this.announce(N('Paused.'));
   }
 
   /** Results-screen leaderboard line: key in lbPosting/lbRank/lbPosted/lbNotPosted, or null to hide. */
@@ -568,60 +644,67 @@ export class UI {
     const line = typeof document !== 'undefined' ? document.getElementById('results-lb') : null;
     if (!line) return;
     line.hidden = !key;
-    line.textContent = key ? String(this.shT[key] || '').replace('{rank}', String(rank)) : '';
+    line.__loc = { t: () => (key ? String(this.shT[key] || '').replace('{rank}', String(rank)) : '') };
+    LOC.add(line);
+    applyLoc(line);
   }
 
   showResults(result) {
     this._stopTimer();
     const { outcome, score, progressionText, newAchievements, sessionMeta, allowNext } = result;
-    const headline = outcome === 'completed' ? 'Pantry stocked!' : outcome === 'out-of-moves' ? 'Out of moves' : 'Round resigned';
+    const headline = outcome === 'completed' ? N('Pantry stocked!') : outcome === 'out-of-moves' ? N('Out of moves') : N('Round resigned');
     const rows = [
-      ['Target words', score.target], ['Bonus words', score.bonus], ['Length bonus', score.length],
-      ['Streak bonus', score.streak], ['Invalid penalty', score.penalty], ['Time bonus', score.time],
+      [N('Target words'), score.target], [N('Bonus words'), score.bonus], [N('Length bonus'), score.length],
+      [N('Streak bonus'), score.streak], [N('Invalid penalty'), score.penalty], [N('Time bonus'), score.time],
     ];
+    // progressionText / comparison arrive as [[key, vars], …] so they re-render in the new language.
+    const lines = (parts) => () => parts.map(([k, v]) => T(k, resolveVars(v))).join(' ');
     const node = el('main', { class: 'lp-panel lp-results', role: 'main' },
-      el('h2', { text: headline, 'data-autofocus': '', tabindex: '-1' }),
+      el('h2', { t: headline, 'data-autofocus': '', tabindex: '-1' }),
       outcome === 'completed' ? el('img', {
         class: 'lp-results-art', src: './assets/results-tray.webp', alt: '',
         role: 'presentation', decoding: 'async', loading: 'lazy',
         onerror: (e) => { e.target.remove(); },
       }) : null,
       el('table', { class: 'lp-score-table' },
-        el('caption', { text: 'Score breakdown' }),
+        el('caption', { t: 'Score breakdown' }),
         el('tbody', {},
-          rows.map(([label, v]) => el('tr', {}, el('th', { scope: 'row', text: label }), el('td', { text: String(v) }))),
-          el('tr', { class: 'lp-total' }, el('th', { scope: 'row', text: 'Total' }), el('td', { text: String(score.total) })))),
-      progressionText ? el('p', { class: 'lp-progress-note', text: progressionText }) : null,
+          rows.map(([label, v]) => el('tr', {}, el('th', { scope: 'row', t: label }), el('td', { text: String(v) }))),
+          el('tr', { class: 'lp-total' }, el('th', { scope: 'row', t: 'Total' }), el('td', { text: String(score.total) })))),
+      progressionText && progressionText.length ? el('p', { class: 'lp-progress-note', t: lines(progressionText) }) : null,
       newAchievements && newAchievements.length
         ? el('div', { class: 'lp-achievements' },
-            el('h3', { text: 'Achievements unlocked' }),
-            el('ul', {}, newAchievements.map((a) => el('li', {}, `🏆 ${a.name} — ${a.desc}`))))
+            el('h3', { t: 'Achievements unlocked' }),
+            el('ul', {}, newAchievements.map((a) => el('li', { t: () => `🏆 ${T(a.name)} — ${T(a.desc)}` }))))
         : null,
-      result.comparison ? el('p', { class: 'lp-progress-note', text: result.comparison }) : null,
+      result.comparison && result.comparison.length ? el('p', { class: 'lp-progress-note', t: lines(result.comparison) }) : null,
       el('p', { class: 'lp-progress-note', id: 'results-lb', role: 'status', hidden: '' }),
       el('div', { class: 'lp-row' },
-        el('button', { class: 'lp-btn lp-btn-primary', onclick: () => this.h.onRetry() }, 'Retry'),
-        allowNext ? el('button', { class: 'lp-btn', onclick: () => this.h.onNext() }, 'Next stage') : null,
-        el('button', { class: 'lp-btn', onclick: () => this.h.onLeaveRound('results') }, 'Back to title'),
+        el('button', { class: 'lp-btn lp-btn-primary', onclick: () => this.h.onRetry(), t: 'Retry' }),
+        allowNext ? el('button', { class: 'lp-btn', onclick: () => this.h.onNext(), t: 'Next stage' }) : null,
+        el('button', { class: 'lp-btn', onclick: () => this.h.onLeaveRound('results'), t: 'Back to title' }),
       ),
     );
     this._setScreen('results', node);
-    this.announce(`${headline}. Total score ${score.total}.`, true);
+    this.announce('{headline}. Total score {score}.', true, { headline: T(headline), score: score.total });
   }
 
   showHelp(inOverlay = false) {
-    const card = (title, text) => el('article', { class: 'lp-help-card' }, el('h3', { text: title }), el('p', { text }));
+    const card = (title, text, vars) => el('article', { class: 'lp-help-card' }, el('h3', { t: title }), el('p', { t: text, tv: vars }));
     const node = el('div', { class: 'lp-panel lp-help' },
-      el('h2', { text: 'How to play' }),
+      el('h2', { t: 'How to play' }),
       el('div', { class: 'lp-help-grid' },
-        card('Goal', 'Rearrange the letter biscuits to find every target word. Bonus words score extra.'),
-        card('Select', 'Tap or focus a letter and press Enter to pick it. Letters form a word in pick order.'),
-        card('Submit', 'With 3+ letters picked, press Submit. Invalid words cost 25 points and break your streak.'),
-        card('Tools', 'Shuffle mixes the tray. Undo takes back an action where allowed. Hint reveals a letter of an unfound word.'),
-        card('Keyboard', `${this._keys('prev')} ${this._keys('next')} move between letters · Enter picks a focused letter · ${this._keys('submit')} submits · ${this._keys('unpick')} unpicks · ${this._keys('clear')} clears · ${this._keys('pause')} pause · ${this._keys('undo')} undo · ${this._keys('hint')} hint · ${this._keys('camera')} camera reset.`),
-        card('Scoring', 'Target word 100 + 25 per letter past 3. Bonus word 50 + 10 per letter past 3. Streaks add 15 each. Beat par time for a bonus.'),
+        card(N('Goal'), N('Rearrange the letter biscuits to find every target word. Bonus words score extra.')),
+        card(N('Select'), N('Tap or focus a letter and press Enter to pick it. Letters form a word in pick order.')),
+        card(N('Submit'), N('With 3+ letters picked, press Submit. Invalid words cost 25 points and break your streak.')),
+        card(N('Tools'), N('Shuffle mixes the tray. Undo takes back an action where allowed. Hint reveals a letter of an unfound word.')),
+        card(N('Keyboard'), N('{prev} {next} move between letters · Enter picks a focused letter · {submit} submits · {unpick} unpicks · {clear} clears · {pause} pause · {undo} undo · {hint} hint · {camera} camera reset.'), {
+          prev: this._keys('prev'), next: this._keys('next'), submit: this._keys('submit'), unpick: this._keys('unpick'),
+          clear: this._keys('clear'), pause: this._keys('pause'), undo: this._keys('undo'), hint: this._keys('hint'), camera: this._keys('camera'),
+        }),
+        card(N('Scoring'), N('Target word 100 + 25 per letter past 3. Bonus word 50 + 10 per letter past 3. Streaks add 15 each. Beat par time for a bonus.')),
       ),
-      el('button', { class: 'lp-btn lp-back', onclick: () => inOverlay ? this.showPause() : this.h.onLeaveRound('to-title') }, 'Back'),
+      el('button', { class: 'lp-btn lp-back', onclick: () => inOverlay ? this.showPause() : this.h.onLeaveRound('to-title'), t: 'Back' }),
     );
     if (inOverlay) this._openOverlay('help', node);
     else this._setScreen('help', node);
@@ -630,32 +713,32 @@ export class UI {
   showSettings(inOverlay = false) {
     const s = this.settings;
     const slider = (label, key) => el('label', { class: 'lp-setting' },
-      el('span', { text: label }),
+      el('span', { t: label }),
       el('input', {
         type: 'range', min: '0', max: '1', step: '0.05', value: String(s[key]),
-        'aria-label': label,
+        at: label,
         oninput: (e) => this.updateSetting(key, Number(e.target.value)),
       }));
     const toggle = (label, key) => el('label', { class: 'lp-setting' },
-      el('span', { text: label }),
+      el('span', { t: label }),
       el('input', {
-        type: 'checkbox', 'aria-label': label,
+        type: 'checkbox', at: label,
         onchange: (e) => this.updateSetting(key, e.target.checked),
         ...(s[key] ? { checked: '' } : {}),
       }));
     const node = el('div', { class: 'lp-panel lp-settings' },
-      el('h2', { text: 'Settings' }),
-      el('fieldset', {}, el('legend', { text: 'Audio' }),
-        slider('Music volume', 'music'), slider('Effects volume', 'effects'), slider('Ambience volume', 'ambience')),
+      el('h2', { t: 'Settings' }),
+      el('fieldset', {}, el('legend', { t: 'Audio' }),
+        slider(N('Music volume'), 'music'), slider(N('Effects volume'), 'effects'), slider(N('Ambience volume'), 'ambience')),
       this._graphicsSection(toggle),
-      el('fieldset', {}, el('legend', { text: 'Accessibility' }),
-        toggle('Larger text', 'largerText'), toggle('Color-vision-safe palette', 'cvdPalette'),
-        toggle('Left-handed controls', 'leftHanded'), toggle('Haptics off', 'hapticsOff'),
-        toggle('Replay tutorial prompts', 'tutorialReplay')),
-      el('fieldset', {}, el('legend', { text: 'Themes' }),
+      el('fieldset', {}, el('legend', { t: 'Accessibility' }),
+        toggle(N('Larger text'), 'largerText'), toggle(N('Color-vision-safe palette'), 'cvdPalette'),
+        toggle(N('Left-handed controls'), 'leftHanded'), toggle(N('Haptics off'), 'hapticsOff'),
+        toggle(N('Replay tutorial prompts'), 'tutorialReplay')),
+      el('fieldset', {}, el('legend', { t: 'Themes' }),
         el('div', { class: 'lp-row' }, THEMES.map((t) =>
-          el('button', { class: 'lp-btn', onclick: () => { this.h.onThemeChange && this.h.onThemeChange(t.id); this.announce(`Theme: ${t.name}`); } }, t.name)))),
-      el('button', { class: 'lp-btn lp-back', onclick: () => inOverlay ? this.showPause() : this.h.onLeaveRound('to-title') }, 'Back'),
+          el('button', { class: 'lp-btn', onclick: () => { this.h.onThemeChange && this.h.onThemeChange(t.id); this.announce('Theme: {name}', false, { name: T(t.name) }); }, t: t.name })))),
+      el('button', { class: 'lp-btn lp-back', onclick: () => inOverlay ? this.showPause() : this.h.onLeaveRound('to-title'), t: 'Back' }),
     );
     if (inOverlay) this._openOverlay('settings', node);
     else this._setScreen('settings', node);
@@ -665,8 +748,9 @@ export class UI {
   // adaptive resolution, frame-rate readout and a GPU/cost summary. Strings
   // come from gfx-i18n.js in the browser's locale.
   _graphicsSection(toggle) {
-    const L = pickLocale(typeof navigator !== 'undefined' ? navigator.language : 'en-US');
-    const t = (k, v) => gfxT(L, k, v);
+    // Strings follow the game language; `lt(k, v)` is the re-renderable form.
+    const t = (k, v) => gfxT(pickLocale(getLang()), k, v);
+    const lt = (k, v) => () => t(k, typeof v === 'function' ? v() : v);
     const tier = (x) => t('t_' + x);
     const info = () => (this.h.getGraphicsInfo ? this.h.getGraphicsInfo() : null);
     const detected = (info() || {}).detected || 'balanced';
@@ -674,41 +758,41 @@ export class UI {
     const chosen = () => (PRESETS.includes((this.settings.gfx || {}).preset) ? this.settings.gfx.preset : 'auto');
     const effective = () => (chosen() === 'auto' ? detected : chosen());
     const save = (g) => { this.updateSetting('gfx', g); refresh(); setTimeout(updateSummary, 120); };
-    const row = (label, control, extra) => el('label', { class: 'lp-setting' }, el('span', { text: label }), extra || null, control);
+    const row = (label, control, extra) => el('label', { class: 'lp-setting' }, el('span', { t: label }), extra || null, control);
 
     const presetSel = el('select', {
-      id: 'gfx-preset', 'data-gfx': 'preset', 'aria-label': t('quality'),
+      id: 'gfx-preset', 'data-gfx': 'preset', at: lt('quality'),
       onchange: (e) => save(choosePreset(saved(), e.target.value)),
-    }, el('option', { value: 'auto', text: t('auto', { tier: tier(detected) }) }),
-    PRESETS.map((p) => el('option', { value: p, text: tier(p) })));
+    }, el('option', { value: 'auto', t: lt('auto', () => ({ tier: tier(detected) })) }),
+    PRESETS.map((p) => el('option', { value: p, t: () => tier(p) })));
 
     const scaleOut = el('output', { id: 'gfx-scale-value', class: 'lp-gfx-value', for: 'gfx-scale' });
     const scale = el('input', {
       type: 'range', id: 'gfx-scale', 'data-gfx': 'render_scale', min: '50', max: '200', step: '5',
-      'aria-label': t('renderScale'),
+      at: lt('renderScale'),
       oninput: (e) => { const g = saved(); g.render_scale = Number(e.target.value) / 100; save(g); },
     });
     const cats = {};
     const catRows = Object.entries(CATEGORIES).map(([cat, tiers]) => {
       cats[cat] = el('select', {
-        id: 'gfx-cat-' + cat, 'data-gfx-cat': cat, 'aria-label': t('cat_' + cat),
+        id: 'gfx-cat-' + cat, 'data-gfx-cat': cat, at: lt('cat_' + cat),
         onchange: (e) => {
           const g = saved();
           if (e.target.value === 'preset') delete g[cat]; else g[cat] = e.target.value;
           save(g);
         },
-      }, el('option', { value: 'preset' }), tiers.map((x) => el('option', { value: x, text: tier(x) })));
-      return row(t('cat_' + cat), cats[cat]);
+      }, el('option', { value: 'preset', t: () => t('fromPreset', { tier: tier(presetTier(effective(), cat)) }) }), tiers.map((x) => el('option', { value: x, t: () => tier(x) })));
+      return row(lt('cat_' + cat), cats[cat]);
     });
     const check = (id, key, label) => {
       const box = el('input', {
-        type: 'checkbox', id, 'data-gfx': key, 'aria-label': label,
+        type: 'checkbox', id, 'data-gfx': key, at: label,
         onchange: (e) => { const g = saved(); g[key] = e.target.checked; save(g); },
       });
       return box;
     };
-    const adaptive = check('gfx-adaptive', 'adaptive', t('adaptive'));
-    const fps = check('gfx-fps', 'show_fps', t('showFps'));
+    const adaptive = check('gfx-adaptive', 'adaptive', lt('adaptive'));
+    const fps = check('gfx-fps', 'show_fps', lt('showFps'));
     const summary = el('p', { id: 'gfx-summary', class: 'lp-gfx-summary' });
     const note = el('p', { id: 'gfx-post-note', class: 'lp-gfx-note', role: 'note', hidden: '' });
 
@@ -727,7 +811,7 @@ export class UI {
     };
     const updateSummary = () => {
       const i = info();
-      const text = i ? `${i.gpu || t('gpuUnknown')} · ${i.summary}` : t('noWebgl');
+      const text = i ? `${i.gpu || t('gpuUnknown')} · ${localizeSummary(i.summary)}` : t('noWebgl');
       if (summary.textContent !== text) summary.textContent = text;
       note.textContent = t('postUnavailable');
       note.hidden = !(i && i.postFailed);
@@ -736,20 +820,23 @@ export class UI {
     updateSummary();
     const timer = setInterval(() => { if (!summary.isConnected) clearInterval(timer); else updateSummary(); }, 1000);
 
-    return el('fieldset', { class: 'lp-gfx', 'data-gfx-section': '' }, el('legend', { text: t('graphics') }),
-      row(t('quality'), presetSel),
-      el('label', { class: 'lp-setting lp-gfx-scale' }, el('span', { text: t('renderScale') }),
+    // The summary and note re-read the language on their 1 s refresh; registered
+    // so a language change updates them at once.
+    summary.__loc = { t: () => { updateSummary(); return summary.textContent; } }; LOC.add(summary);
+    return el('fieldset', { class: 'lp-gfx', 'data-gfx-section': '' }, el('legend', { t: lt('graphics') }),
+      row(lt('quality'), presetSel),
+      el('label', { class: 'lp-setting lp-gfx-scale' }, el('span', { t: lt('renderScale') }),
         el('span', { class: 'lp-gfx-range' }, scale, scaleOut)),
       catRows,
-      row(t('adaptive'), adaptive),
-      row(t('showFps'), fps),
-      toggle('Reduced motion', 'reducedMotion'), toggle('High contrast', 'highContrast'),
+      row(lt('adaptive'), adaptive),
+      row(lt('showFps'), fps),
+      toggle(N('Reduced motion'), 'reducedMotion'), toggle(N('High contrast'), 'highContrast'),
       summary, note);
   }
 
-  showPreparing(label, countdownSeconds = 3) {
+  showPreparing(meta, countdownSeconds = 3) {
     const node = el('main', { class: 'lp-panel lp-preparing', role: 'main' },
-      el('h2', { text: label }),
+      el('h2', { t: () => modeLabel(meta) }),
       el('p', { class: 'lp-countdown', id: 'lp-countdown', role: 'timer' }, '…'),
     );
     this._setScreen('preparing', node);
@@ -767,16 +854,15 @@ export class UI {
 
   showError(message, recover) {
     const node = el('main', { class: 'lp-panel lp-error', role: 'alert' },
-      el('h2', { text: 'Something went wrong' }),
-      el('p', { text: message }),
-      el('button', { class: 'lp-btn lp-btn-primary', onclick: recover }, 'Continue'),
+      el('h2', { t: 'Something went wrong' }),
+      el('p', { t: message }),
+      el('button', { class: 'lp-btn lp-btn-primary', onclick: recover, t: 'Continue' }),
     );
     this._setScreen('error', node);
   }
 
   showCompatNotice(reason) {
-    const note = el('div', { class: 'lp-compat', role: 'note' },
-      '3D view unavailable (' + reason + '). The game below is fully playable.');
+    const note = el('div', { class: 'lp-compat', role: 'note', t: '3D view unavailable ({reason}). The game below is fully playable.', tv: { reason } });
     this.root.prepend(note);
   }
 }

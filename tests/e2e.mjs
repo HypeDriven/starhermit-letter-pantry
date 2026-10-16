@@ -34,6 +34,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { chromium } from 'playwright-core';
+import { launchToken, stubStarHermit } from './starhermit-e2e.mjs';
 
 import { JOURNEY } from '../content.js';
 
@@ -96,7 +97,8 @@ async function playthrough(label, viewport, hasTouch) {
   const errors = [];
   // Standalone (no launch token) must not touch any own-server route.
   const ownServer = [];
-  page.on('request', (r) => { const u = new URL(r.url()); if (/^https?:$/.test(u.protocol) && /^\/(api|ws)(\/|$)/.test(u.pathname)) ownServer.push(r.method() + ' ' + u.pathname); });
+  const onRequest = (r) => { const u = new URL(r.url()); if (/^https?:$/.test(u.protocol) && /^\/(api|ws)(\/|$)/.test(u.pathname)) ownServer.push(r.method() + ' ' + u.pathname); };
+  page.on('request', onRequest);
   page.on('pageerror', (e) => errors.push(`pageerror: ${e.message}`));
   page.on('console', (m) => {
     if ((m.type() !== 'error' && m.type() !== 'warning') || browserNoise.test(m.text())) return;
@@ -131,7 +133,8 @@ async function playthrough(label, viewport, hasTouch) {
         throw new Error('reduced-motion class not applied');
       }
       // Nudge the music slider with the keyboard (real input event).
-      const music = page.getByLabel('Music volume');
+      // The game's own Audio fieldset (the shared Sound section also has a "Music volume").
+      const music = page.locator('.lp-settings fieldset').first().getByLabel('Music volume', { exact: true });
       const before = await music.inputValue();
       await music.press('ArrowLeft');
       if ((await music.inputValue()) === before) throw new Error('music slider did not respond');
@@ -358,6 +361,96 @@ async function playthrough(label, viewport, hasTouch) {
         throw new Error('journey progress not shown on title');
       }
       await shot('title-return');
+    });
+
+    await step('language: Automatic follows the StarHermit preferred language (fr-CA); Deutsch re-renders and saves ui.language; report a problem', async () => {
+      // Standalone checks end here; the signed-in steps talk to a stubbed API.
+      page.off('request', onRequest);
+      const calls = await stubStarHermit(page, { preferredLanguage: 'fr-CA' });
+      await page.goto('about:blank');
+      await page.goto(BASE + '/index.html#game_token=' + launchToken(), { waitUntil: 'load' });
+      await page.waitForFunction(() => document.documentElement.lang === 'fr-CA', null, { timeout: 15000 });
+      await page.waitForSelector('.lp-title');
+      if ((await page.textContent('.lp-title-nav button')) !== 'Jouer') throw new Error('title not in fr-CA');
+      await page.getByRole('button', { name: 'Paramètres', exact: true }).click();
+      await page.waitForSelector('.lp-settings');
+      const choice = page.locator('[data-game-language="choice"]');
+      if ((await choice.count()) !== 1) throw new Error('expected exactly one Language select');
+      await choice.scrollIntoViewIfNeeded();
+      const auto = await choice.locator('option').first().textContent();
+      if (auto !== 'Automatique — Français (Canada)') throw new Error('Automatic label: ' + auto);
+      await page.evaluate(() => { document.querySelector('[data-game-language="choice"]').__kept = true; });
+      await choice.selectOption('de-DE');
+      await page.waitForFunction(() => document.documentElement.lang === 'de-DE');
+      await page.waitForFunction(() => /Im Konto gespeichert/.test(document.querySelector('[data-game-language="status"]').textContent), null, { timeout: 5000 });
+      if (calls.settings['ui.language']?.choice !== 'de-DE') throw new Error('ui.language not saved: ' + JSON.stringify(calls.settings));
+      const de = await page.evaluate(() => ({
+        h: document.querySelector('.lp-settings h2').textContent,
+        gfx: document.querySelector('.lp-gfx legend').textContent,
+        music: document.querySelector('.lp-settings fieldset .lp-setting span').textContent,
+        back: document.querySelector('.lp-settings .lp-back').textContent,
+        kept: document.querySelector('[data-game-language="choice"]').__kept === true,
+      }));
+      if (de.h !== 'Einstellungen' || de.gfx !== 'Grafik' || de.music !== 'Musiklautstärke' || de.back !== 'Zurück' || !de.kept) {
+        throw new Error('settings not re-rendered in place: ' + JSON.stringify(de));
+      }
+      await page.locator('[data-game-report="title"]').scrollIntoViewIfNeeded();
+      await page.fill('[data-game-report="title"]', 'Language test report');
+      await page.click('[data-game-report="send"]');
+      await page.waitForFunction(() => /Danke/.test(document.querySelector('[data-game-report="status"]').textContent), null, { timeout: 5000 });
+      if (!calls.reports?.[0] || calls.reports[0].kind !== 'bug') throw new Error('report not posted');
+      if (await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 1)) throw new Error('German settings overflow horizontally');
+      const fit = await page.evaluate(() => [...document.querySelectorAll('.lp-settings fieldset')].every((f) => f.getBoundingClientRect().right <= innerWidth + 1));
+      if (!fit) throw new Error('a German settings fieldset is cut off');
+      await shot('language-de');
+      await page.locator('.lp-settings .lp-back').click();
+      await page.waitForSelector('.lp-title');
+      if (!(await page.locator('.lp-title-nav button', { hasText: /^Reise \(/ }).count())) throw new Error('title not German');
+    });
+
+    await step('language: switching mid-round re-renders the HUD, tray and pause dialog and keeps the round', async () => {
+      await page.getByRole('button', { name: 'Spielen', exact: true }).click();
+      await page.locator('.lp-mode-card button').first().click();
+      await page.locator('.lp-stage').first().click();
+      await page.waitForSelector('.lp-play', { timeout: 10000 });
+      await page.locator('.lp-letter').first().click();
+      const before = await page.evaluate(() => ({ cur: document.getElementById('lp-current').textContent, letters: [...document.querySelectorAll('.lp-letter')].map((b) => b.textContent).join('') }));
+      await page.keyboard.press('p');
+      await page.waitForSelector('#lp-overlay .lp-pause');
+      await page.getByRole('button', { name: 'Audio & Grafik', exact: true }).click();
+      await page.waitForSelector('#lp-overlay .lp-settings');
+      const choice = page.locator('[data-game-language="choice"]');
+      await choice.scrollIntoViewIfNeeded();
+      await choice.selectOption('it-IT');
+      await page.waitForFunction(() => document.documentElement.lang === 'it-IT');
+      if ((await page.textContent('#lp-overlay .lp-settings h2')) !== 'Impostazioni') throw new Error('settings overlay not Italian');
+      await page.locator('#lp-overlay .lp-settings .lp-back').click();
+      await page.waitForSelector('#lp-overlay .lp-pause');
+      if ((await page.textContent('#lp-overlay .lp-pause h2')) !== 'In pausa') throw new Error('pause dialog not Italian');
+      await page.getByRole('button', { name: 'Riprendi', exact: true }).click();
+      await page.waitForSelector('#lp-overlay', { state: 'detached' });
+      const it = await page.evaluate(() => ({
+        heading: document.querySelector('.lp-hud-heading').textContent,
+        submit: document.getElementById('lp-act-submit').textContent,
+        objective: document.getElementById('lp-objective').textContent,
+        letter: document.querySelector('.lp-letter').getAttribute('aria-label'),
+        cur: document.getElementById('lp-current').textContent,
+        letters: [...document.querySelectorAll('.lp-letter')].map((b) => b.textContent).join(''),
+      }));
+      if (!/^Tappa 1 del percorso — facile/.test(it.heading) || it.submit !== 'Invia' || !/^Trova tutte le/.test(it.objective) || !/^Lettera /.test(it.letter)) {
+        throw new Error('round not re-rendered: ' + JSON.stringify(it));
+      }
+      if (it.cur !== before.cur || it.letters !== before.letters) throw new Error('the round changed during the language switch');
+      await shot('language-it-play');
+      await page.keyboard.press('p');
+      await page.getByRole('button', { name: 'Abbandona il turno', exact: true }).click();
+      await page.waitForSelector('.lp-title');
+      await page.getByRole('button', { name: 'Impostazioni', exact: true }).click();
+      await choice.scrollIntoViewIfNeeded();
+      await choice.selectOption('auto');
+      await page.waitForFunction(() => document.documentElement.lang === 'fr-CA');
+      await page.locator('.lp-settings .lp-back').click();
+      await page.unroute(/\/api\/v1\//);
     });
   } finally {
     if (ownServer.length) failures.push(`[${label}] standalone requested own-server routes: ` + ownServer.join(', '));

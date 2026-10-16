@@ -330,7 +330,7 @@ function loadSdk() {
 }
 const SH_USER = 'a1b2c3d4-0000-4000-8000-000000000001';
 const SH_SLUG = 'letter-pantry';
-function shFixture(href) {
+function shFixture(href, shared = { slot: null, etag: null, version: 0 }) {
   const b64url = (o) => Buffer.from(JSON.stringify(o)).toString('base64url');
   const jwt = `${b64url({ alg: 'none' })}.${b64url({ sub: SH_USER, game_scope: SH_SLUG, exp: Math.floor(Date.now() / 1000) + 3600 })}.sig`;
   const u = new URL(href.replace('{jwt}', jwt));
@@ -339,7 +339,6 @@ function shFixture(href) {
     history: { state: null, replaceState(_s, _t, url) { win.replaced = url; } },
   };
   const calls = [];
-  let slot = null;
   const kv = { music: 0.2 };
   const res = (status, body, bytes) => ({
     ok: status >= 200 && status < 300, status,
@@ -351,9 +350,18 @@ function shFixture(href) {
     const body = init.body ? JSON.parse(init.body) : undefined;
     calls.push({ url, method, body, auth: (init.headers || {}).Authorization });
     if (url === `/api/v1/users/${SH_USER}/profile`) return res(200, { nickname: 'Baker Bo', username: 'secretname' });
-    if (url === `/api/v1/me/cloud-saves/${encodeURIComponent('game:' + SH_SLUG)}`) {
-      if (method === 'PUT') { slot = new Uint8Array(Buffer.from(body.dataBase64, 'base64')); return res(204); }
-      return slot ? res(200, null, slot) : res(404);
+    const savePath = `/api/v1/me/cloud-saves/${encodeURIComponent('game:' + SH_SLUG)}`;
+    if (url === savePath + '/info') return res(200, shared.slot ? { exists: true, etag: shared.etag } : { exists: false });
+    if (url === savePath) {
+      // Conditional writes like the platform: stale If-Match / If-None-Match → 412.
+      if (method === 'PUT') {
+        const h = init.headers || {};
+        if ((h['If-Match'] && h['If-Match'] !== shared.etag) || (h['If-None-Match'] === '*' && shared.slot)) return res(412, { error: 'precondition_failed', etag: shared.etag });
+        shared.slot = new Uint8Array(Buffer.from(body.dataBase64, 'base64'));
+        shared.etag = '"v' + (++shared.version) + '"';
+        return res(200, { etag: shared.etag });
+      }
+      return shared.slot ? res(200, null, shared.slot) : res(404);
     }
     if (url === `/api/v1/games/${SH_SLUG}/settings`) {
       if (method === 'PATCH') Object.assign(kv, body.settings);
@@ -397,6 +405,46 @@ await test('platform: cloud save round-trips at game:<slug>', async () => {
   assert.equal(p.syncStatus, 'synced');
 });
 
+await test('platform: a stale cloud write (412) reloads, merges both sides and saves again', async () => {
+  const shared = { slot: null, etag: null, version: 0 };
+  const a = shFixture('https://x.example/#game_token={jwt}', shared);
+  const b = shFixture('https://x.example/#game_token={jwt}', shared);
+  a.platform.init(); b.platform.init();
+  memStore.clear();
+  await a.platform.loadCloud(); await b.platform.loadCloud(); // both read the empty slot
+  // Device A saves first.
+  saveJSON('progression', { completedStages: ['j1', 'j2'] });
+  saveJSON('stats', { roundsCompleted: 5, targetWordsFound: 40 });
+  a.platform.markDirty(); await a.platform.flushSave();
+  // Device B (its own local data) saves second: refused, merged, saved again.
+  saveJSON('progression', { completedStages: ['j3'] });
+  saveJSON('stats', { roundsCompleted: 2, targetWordsFound: 70 });
+  saveJSON('boards', { daily: { s1: { score: 300 } } });
+  let merged = 0;
+  b.platform.onMerged = () => { merged++; };
+  b.platform.markDirty();
+  assert.equal(await b.platform.flushSave(), false, 'stale write refused');
+  for (let i = 0; i < 50 && (!merged || b.sh.saveConflicted()); i++) await new Promise((res) => setTimeout(res, 5));
+  await b.platform.flushSave();
+  assert.equal(merged, 1);
+  assert.deepEqual(loadJSON('progression').completedStages.sort(), ['j1', 'j2', 'j3']);
+  assert.deepEqual(loadJSON('stats'), { roundsCompleted: 5, targetWordsFound: 70 });
+  memStore.clear();
+  const c = shFixture('https://x.example/#game_token={jwt}', shared);
+  c.platform.init();
+  await c.platform.loadCloud();
+  assert.deepEqual(loadJSON('progression').completedStages.sort(), ['j1', 'j2', 'j3'], 'merged doc reached the cloud');
+  assert.equal(loadJSON('boards').daily.s1.score, 300);
+  a.sh.signOut(); b.sh.signOut(); c.sh.signOut();
+});
+
+await test('platform: shared ui.* settings keys are not adopted as game settings', async () => {
+  const { platform: p, kv } = shFixture('https://x.example/#game_token={jwt}');
+  p.init();
+  kv['ui.language'] = { choice: 'de-DE' };
+  assert.deepEqual(await p.loadSettings(), { music: 0.2 });
+});
+
 await test('platform: settings KV load + changed-key patch', async () => {
   const { platform: p, calls, kv } = shFixture('https://x.example/#game_token={jwt}');
   p.init();
@@ -426,7 +474,7 @@ await test('platform: standalone makes no fetch and stays local', async () => {
   assert.equal(p.canSignIn(), false);
   assert.equal(p.inviteLink(), null);
   assert.equal(calls.length, 0);
-  const onHost = shFixture('https://letter-pantry.starhermit.com/');
+  const onHost = shFixture('https://0b9d6f2e-3c4a-4e5b-9a7c-1d2e3f405162.starhermit.com/');
   assert.equal(onHost.platform.init(), false);
   assert.equal(onHost.platform.canSignIn(), true);
   assert.equal(onHost.calls.length, 0);

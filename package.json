@@ -1,7 +1,7 @@
 {
   "private": true,
   "scripts": {
-    "test": "node tests/run-tests.mjs",
+    "test": "node tests/run-tests.mjs && node --test tests/i18n.test.mjs",
     "test:e2e": "node tests/e2e.mjs"
   },
   "dependencies": {

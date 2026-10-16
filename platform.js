@@ -23,6 +23,28 @@ function buildCloudDoc() {
 
 // deps: {sh} SDK instance (default globalThis.StarHermit, resolved lazily),
 // {onStatus(status, platform)}.
+// Another device saved since this one last loaded the slot: keep everything
+// either side earned — completed stages and lessons, unlocked achievements, the
+// larger stats counters, the best daily score per seed — never dropping progress.
+export function mergeCloudDocs(remote, local) {
+  const obj = (v) => (v && typeof v === 'object' && !Array.isArray(v) ? v : {});
+  const union = (a, b) => [...new Set([...(Array.isArray(a) ? a : []), ...(Array.isArray(b) ? b : [])])];
+  const r = obj(remote), l = obj(local);
+  const out = { schemaVersion: 1, savedAt: Date.now() };
+  out.progression = { ...obj(r.progression), ...obj(l.progression), completedStages: union(obj(r.progression).completedStages, obj(l.progression).completedStages) };
+  out.tutorial = { ...obj(r.tutorial), ...obj(l.tutorial), completedLessons: union(obj(r.tutorial).completedLessons, obj(l.tutorial).completedLessons) };
+  out.achievements = { ...obj(r.achievements), ...obj(l.achievements), unlocked: union(obj(r.achievements).unlocked, obj(l.achievements).unlocked) };
+  const stats = { ...obj(r.stats) };
+  for (const [k, v] of Object.entries(obj(l.stats))) stats[k] = typeof v === 'number' ? Math.max(Number(stats[k]) || 0, v) : v;
+  out.stats = stats;
+  const daily = { ...obj(obj(r.boards).daily) };
+  for (const [seed, e] of Object.entries(obj(obj(l.boards).daily))) {
+    if (!daily[seed] || (Number(e && e.score) || 0) > (Number(daily[seed].score) || 0)) daily[seed] = e;
+  }
+  out.boards = { ...obj(r.boards), ...obj(l.boards), daily };
+  return out;
+}
+
 export function createPlatform({ sh: shDep, onStatus } = {}) {
   const S = () => shDep || globalThis.StarHermit || null;
   const authListeners = new Set();
@@ -49,6 +71,7 @@ export function createPlatform({ sh: shDep, onStatus } = {}) {
       if (!sh) { this.setStatus('offline'); return false; }
       sh.init();
       sh.on('saved', (ok) => this.setStatus(ok ? 'synced' : 'offline'));
+      sh.on('saveconflict', () => { this.resolveConflict(); });
       sh.on('auth', (a) => {
         this.active = !!a.signedIn;
         if (!a.signedIn) { this.playerName = null; this.setStatus('offline'); }
@@ -89,6 +112,20 @@ export function createPlatform({ sh: shDep, onStatus } = {}) {
       this.setStatus('synced');
       return !!doc;
     },
+    // Conditional cloud write refused (another device saved first): reload the
+    // slot, merge it into the local keys, tell the game, and save the result.
+    async resolveConflict() {
+      const sh = S();
+      if (!this.active || !sh) return;
+      this.setStatus('saving');
+      const remote = await sh.loadJSON();
+      if (sh.saveLoadFailed() || sh.saveConflicted()) { this.setStatus('offline'); return; }
+      const merged = mergeCloudDocs(remote, buildCloudDoc());
+      for (const key of CLOUD_KEYS) saveJSON(key, merged[key]);
+      if (this.onMerged) this.onMerged(merged);
+      sh.saveJSON(buildCloudDoc(), 0);
+    },
+    onMerged: null,
     markDirty() {
       if (!this.active) return;
       this.setStatus('saving');
@@ -101,9 +138,13 @@ export function createPlatform({ sh: shDep, onStatus } = {}) {
     },
 
     // -- Settings KV (per-player preferences) -------------------------------
+    // Game keys only: `ui.*` keys belong to shared modules (sh-language.js).
     async loadSettings() {
       if (!this.active) return {};
-      return (await S().getSettings()) || {};
+      const all = (await S().getSettings()) || {};
+      const own = {};
+      for (const [k, v] of Object.entries(all)) if (!k.startsWith('ui.')) own[k] = v;
+      return own;
     },
     // Seed the change detector once platform values are applied.
     primeSettings(settings) { lastSettings = JSON.stringify(settings); },

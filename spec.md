@@ -27,14 +27,17 @@ hiding in that tray has been served.
 | `bootstrap.js` | App state machine, module wiring, progression, achievements, local daily bests, cloud-sync hooks, error recovery |
 | `starhermit-sdk.js` | Shared StarHermit client (unmodified copy) |
 | `platform.js` | Adapter over the SDK: hosted flag, nickname, cloud-save mirror + sync status, settings KV, key bindings, sign-in/invite, high-score posting, leaderboard reads |
-| `sh-strings.js` | Account strings in the nine locales |
+| `sh-strings.js` | Account strings in the nine locales, following the game language |
+| `i18n.js`, `locales/` | Localization core (`T`, `N`, `setLocale`, `onLanguage`) and the per-locale catalogues keyed by the US-English text |
+| `sh-language.js` | Shared StarHermit language preference (`window.StarHermitLanguage`), an unmodified copy of `tools/sh-language.js` |
+| `game-options.js` | Shared frame-rate / Language / Sound / Report-a-problem sections, an unmodified copy of `tools/game-options.js` |
 | `rules.js` | Pure deterministic rules engine: RNG, commands, scoring, undo, serialization, replay. No DOM, no timers |
 | `content.js` | Versioned content: dictionary-derived stages, lessons, journey table, challenges, daily generator, themes, achievements, offline validator |
 | `session.js` | Session orchestration: command ids, monotonic clock, replay envelope, checksummed `localStorage` |
 | `ui.js` | Every screen, overlay, control and ARIA live region; settings persistence, including the Graphics section |
 | `render.js` | Three.js presentation layer: pantry scene, biscuits, particles, lighting, lazily loaded post-processing, adaptive resolution; applies graphics settings live; no-ops entirely if WebGL or `THREE` is absent |
 | `gfx.js` | Pure graphics quality model: presets, per-category tiers, GPU detection, `resolve()`, `choosePreset()`, `presetTier()`, `describe()` |
-| `gfx-i18n.js` | Graphics-section strings in the nine product locales, picked from `navigator.language` |
+| `gfx-i18n.js` | Graphics-section strings in the nine product locales, picked for the game language |
 | `vendor/` | `three.module.min.js` (r170) and `three/addons/` (r170 post-processing passes, shaders, `RoomEnvironment`) |
 | `audio.js` | WebAudio: sample one-shots from `sfx/`, synth fallbacks, three buses, adaptive music bed |
 | `words.js` | The shipped dictionary (`WORDS`, `WORD_SET`) |
@@ -44,7 +47,7 @@ hiding in that tray has been served.
 | `assets/` | `title-backdrop.webp`, `results-tray.webp` |
 | `sfx/` | 15 Opus clips + `manifest.txt` (canonical), `manifest.md`, `manifest.json` |
 | `data/` | Server-side stores (`leaderboard.json`, `achievements.json`); gitignored, API-only |
-| `tests/` | `run-tests.mjs` (22 unit/integration tests), `e2e.mjs` (Playwright playthrough) |
+| `tests/` | `run-tests.mjs` (25 unit/integration tests), `i18n.test.mjs` (every key in all nine locales; keys from `i18n-keys.mjs`), `e2e.mjs` (Playwright playthrough), `starhermit-e2e.mjs` (stubbed platform API) |
 | `coverart.png` | 1200×675 store key art |
 
 ---
@@ -443,22 +446,32 @@ TP=−2), 100 inference steps.
 
 The product requires en-US, en-GB, es-419, es-ES, de-DE, fr-FR, fr-CA, pt-BR and it-IT.
 
-**Today:** the game ships **en-US only**, except the Graphics settings section, whose strings
-(`gfx-i18n.js`) exist in all nine locales and follow `navigator.language`. `index.html` declares `lang="en"`; every interface
-string is an inline literal in `ui.js`, `content.js` (achievement and lesson copy) and
-`bootstrap.js`; there is no string catalogue, no locale detection, and no `Intl` formatting.
+Every interface string is localized. `ui.js` builds every screen with `el()`, whose `t` / `at`
+attributes take an English key (or a thunk) and remember the node; `bootstrap.js` passes result
+lines and round titles as `[key, vars]` pairs. Catalogues in `locales/` are keyed by the US-English
+text (en-US is the identity, en-GB lists spelling changes, es-ES and fr-CA list their differences
+from es-419 and fr-FR). Content copy (themes, achievements, lessons, challenges, difficulty tiers,
+audio captions, rule refusals) is English data translated at display time; the Graphics cost
+summary from `gfx.js` is translated part by part.
 
-Two properties do already hold and constrain the eventual implementation:
-
-- **The dictionary is content, not UI.** Word validation is English by construction
-  (`words.js` + the derived target lists). A localized build needs a per-locale dictionary and a
-  new `CONTENT_VERSION`, because `descriptorFromSeed()` on the server must reproduce the exact
-  same targets. Translating the interface must therefore never silently change the word set.
-- **Layout is already expansion-tolerant.** Buttons are `min-height: 44px` with `padding` rather
-  than fixed widths, rails cap at 70ch and scroll, and the mode grid is
-  `auto-fit minmax(220px, 1fr)`, so a ~35% German expansion reflows instead of clipping.
-
-The remaining work is tracked in §17.
+- Settings → Graphics → **Language → Game language** (rendered by `game-options.js` from the
+  `sh-language.js` instance) offers **Automatic — <resolved language>** plus the nine locales by
+  native name and a status line (Saved to account / Saved on this device / Account sync
+  unavailable); it is reachable from the title and from the pause dialog (Audio & graphics).
+- A change applies immediately: `<html lang>` updates and `UI.relocalize()` re-renders every
+  remembered label in place (title, mode cards, lists, settings — the open Language select and the
+  shared sections are never rebuilt — pause and help dialogs, results), then the play HUD, word
+  slots, board summary and lesson box from the current snapshot. The round is untouched.
+- Resolution (`sh-language.js`): explicit game choice → for Automatic, the StarHermit account's
+  `preferredLanguage` (`GET /api/v1/me/language`, signed in only) → `navigator.languages` → en-US.
+  The choice is stored per player in `localStorage['letter-pantry.language.<user|guest>']` and,
+  signed in, in the per-player settings key `ui.language` as `{ choice }`; the game's settings
+  mirror ignores `ui.*` keys. `?lang=` forces a locale for the page load (QA).
+- **The dictionary is content, not UI.** Word validation is English by construction (`words.js` +
+  the derived target lists) in every interface language; a localized word set would need
+  per-locale dictionaries and a new `CONTENT_VERSION` so server-side replay stays exact.
+- Layout is expansion-tolerant: buttons pad rather than fix widths, rails scroll and the mode
+  grid reflows; the German settings fit 390 px.
 
 ---
 
@@ -514,7 +527,10 @@ modules) via the adapter `platform.js`. Without a launch token nothing calls the
 | Leaderboard reads | The Daily results line shows the top entry of the game's default platform board (`StarHermit.leaderboard()`, names via profiles) as "High-score board: top …"; otherwise only local records show. Daily personal bests live locally (in the cloud-saved doc) |
 | Achievements | Local only (part of the cloud-saved progress doc); `score-script.js` only posts scores, so there is no server-owned unlock path |
 
-Account strings (sign-in, invite, toasts, leaderboard line) are localized in the nine locales (`sh-strings.js`).
+| Save conflicts | After the boot load, cloud writes are conditional (SDK ETag). When another device saved first the SDK emits `saveconflict`; `platform.resolveConflict()` reloads the slot and merges it into the local keys (`mergeCloudDocs`: union of completed stages, lessons and achievements, the larger stats counters, the best daily score per seed), the game reloads its in-memory progress, and the merged doc is saved again. A failed reload keeps local progress |
+| Report a problem | Settings (signed in only, from `game-options.js`) files a bug report through `StarHermit.reportBug`; uncaught errors are filed as crash reports through `StarHermit.captureCrashes` (SDK-capped) |
+
+Account strings (sign-in, invite, toasts, leaderboard line) are localized in the nine locales (`sh-strings.js`) and follow the game language.
 
 **Standalone (no launch token).** The client makes no request to any `/api` or `/ws` route:
 device clock, daily bests and achievements kept locally, results read "Score kept on this
@@ -580,7 +596,7 @@ does any same-origin `/api` or `/ws` request during the standalone pass.
 
 ## 14. Testing and acceptance criteria
 
-**`npm test` → `tests/run-tests.mjs`, 22 tests, no framework.** It verifies: the three terminal
+**`npm test` → `tests/run-tests.mjs`, 25 tests, no framework, then `tests/i18n.test.mjs`.** It verifies: the three terminal
 states; undo and hint semantics; serialization round-trip and the v0→v1 migration; deterministic
 replay across many seeds (property loop); a malformed-command fuzz that must neither throw nor
 hang; that command stamps drive the round clock and par-time bonus; that practice seeds
@@ -588,7 +604,7 @@ round-trip through `descriptorFromSeed`; that `validateContent()` passes every a
 a sample of dailies; idempotent duplicate-command rejection; envelope hashes and terminal result;
 platform adapter behavior over the real SDK with a stubbed fetch (fragment token read + strip,
 Bearer, profile nickname, `game:<slug>` cloud-save round-trip, settings KV changed-key patch,
-invite link, zero fetches standalone, sign-in offered on the platform host); client/server daily parity; that score validation accepts a valid replay and rejects a
+invite link, zero fetches standalone, sign-in offered on the UUID platform host, a stale conditional write (412) that reloads, merges and saves again, `ui.*` keys kept out of game settings); client/server daily parity; that score validation accepts a valid replay and rejects a
 tampered one; that the server blocks path traversal and 404s as JSON; and the graphics model —
 `detectPreset` on sample GPU strings (software → Low, discrete/Apple M → High, touch capped at
 Balanced), `resolve()` with presets, overrides, invalid values and the 50–200% scale clamp,
@@ -609,7 +625,11 @@ biscuits; P pauses, the settings overlay opens, Resume returns to play; a full r
 *Resume saved round* preserves the Journey context; the round completes to "Pantry stocked!" with
 a 7-row table whose total matches the announced total; progression persists and no resumable
 snapshot lingers; Next stage starts stage 2; pause → leave returns to a title showing
-`Journey (1/…`.
+`Journey (1/…`; then, against a stubbed StarHermit API, `GET /api/v1/me/language` → fr-CA makes
+Automatic resolve to fr-CA, Deutsch re-renders Settings in place (the Language select survives),
+PUTs `ui.language`, Report a problem posts to `/reports`, the German settings fit the screen, and
+Italiano chosen from the pause dialog re-renders the settings and pause dialogs, HUD heading,
+actions, objective and letter labels while the tray and current word stay the same.
 
 **QA bar** (from `agents/qa.md`), as checkable statements:
 
@@ -623,7 +643,7 @@ snapshot lingers; Next stage starts stage 2; pause → leave returns to a title 
    `100dvh`, rails cap at 34dvh in portrait, safe-area insets pad every edge. ✔
 5. Features that could use StarHermit do: time, daily, score validation, leaderboard,
    achievements (§12). ✔
-6. Localization: **not met** — en-US only (§10, §17).
+6. Localization: all nine locales with live switching (§10). ✔
 
 ---
 
@@ -654,33 +674,28 @@ cheaper and sharper as procedural geometry driven by the theme palette.
 
 ## 16. Known limitations
 
-1. **English only.** No i18n layer beyond the Graphics section's string table (§10).
-2. **No shared daily board standalone.** Standalone the client submits no scores (the `server.js`
+1. **No shared daily board standalone.** Standalone the client submits no scores (the `server.js`
    board is test-only). On-platform, finished rounds post to the single `high-score` board;
    there is no per-day platform board.
-3. **Practice seeds churn by the minute.** `derivePractice` is seeded on
+2. **Practice seeds churn by the minute.** `derivePractice` is seeded on
    `floor(serverNow / 60000)`, so *Retry* within the same minute repeats the same tray while a
    retry across a minute boundary silently changes it.
-4. **Shuffle discards the selection**, because selection is index-based. Undo recovers it.
-5. **Bonus words are not listed at the end.** Results show only a count, so a player never learns
+3. **Shuffle discards the selection**, because selection is index-based. Undo recovers it.
+4. **Bonus words are not listed at the end.** Results show only a count, so a player never learns
    which bonus words they missed.
-6. **The Learn lessons match on command type only.** Performing a `submit` of any kind advances a
+5. **The Learn lessons match on command type only.** Performing a `submit` of any kind advances a
    step that asked for a bonus word specifically.
-7. **No gamepad support.** The spec's ideal input set includes one; only keyboard, mouse and
+6. **No gamepad support.** The spec's ideal input set includes one; only keyboard, mouse and
    touch are implemented.
-8. **The 3D tray does not accept clicks.** All input goes through the DOM buttons; the canvas is
+7. **The 3D tray does not accept clicks.** All input goes through the DOM buttons; the canvas is
    presentation only, so there is no raycasting and no drag-to-spell.
-9. **Journey stage 1 has 3 targets, not the tier's 4**, because `TEA` yields only three formable
+8. **Journey stage 1 has 3 targets, not the tier's 4**, because `TEA` yields only three formable
    three-letter words. The generator takes what the dictionary offers rather than padding.
 
 ---
 
 ## 17. Design intent not yet implemented
 
-- **Localization to the nine required locales.** Needs a string catalogue extracted from `ui.js`,
-  `content.js` and `bootstrap.js`, a locale picker plus `navigator.language` detection, `Intl`
-  number and date formatting, and per-locale dictionaries carried by a bumped `CONTENT_VERSION`
-  so server-side replay stays exact.
 - **Bonus-word review on the results screen**, listing found and missed bonus words.
 - **A stable practice seed per retry**, so *Retry* is a genuine retry of the same tray.
 - **Direct interaction with the 3D biscuits** (raycast pick and drag-to-spell) as an addition to,

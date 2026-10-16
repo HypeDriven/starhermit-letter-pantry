@@ -9,6 +9,10 @@ import { createRenderer } from './render.js';
 import { UI, loadSettings, saveSettings, DEFAULT_SETTINGS, DEFAULT_BINDINGS } from './ui.js';
 import { PantryAudio } from './audio.js';
 import { platform } from './platform.js';
+import { T, N, initLanguage, onLanguage } from './i18n.js';
+
+// The game language follows Settings › Language (sh-language.js).
+initLanguage();
 
 const canvas = document.getElementById('game-canvas');
 const uiRoot = document.getElementById('ui-root');
@@ -42,9 +46,9 @@ function persist(key, value) {
 
 function syncStatusText() {
   if (!platform.active) return '';
-  const name = platform.playerName || 'Player ' + (platform.sub || '?').slice(0, 6);
-  const sync = { saving: 'syncing…', synced: 'synced', offline: 'sync unavailable — local save' }[platform.syncStatus] || '';
-  return sync ? `${name} · ${sync}` : name;
+  const name = platform.playerName || T('Player {id}', { id: (platform.sub || '?').slice(0, 6) });
+  const sync = { saving: N('syncing…'), synced: N('synced'), offline: N('sync unavailable — local save') }[platform.syncStatus] || '';
+  return sync ? `${name} · ${T(sync)}` : name;
 }
 
 function updatePlayerStatus() {
@@ -175,9 +179,9 @@ function handleLessonProgress(command) {
         app.tutorial.completedLessons.push(lesson.id);
         persist('tutorial', app.tutorial);
       }
-      app.ui.announce('Lesson complete!', true);
+      app.ui.announce(N('Lesson complete!'), true);
     } else {
-      app.ui.announce('Good! Next step.');
+      app.ui.announce(N('Good! Next step.'));
     }
   }
 }
@@ -189,17 +193,19 @@ async function showResults() {
   const descriptor = app.meta.descriptor;
 
   // Progression updates.
-  let progressionText = '';
+  // Result lines are [key, vars] pairs so the results screen can re-render them
+  // in another language.
+  const progressionText = [];
   if (outcome === 'completed') {
     app.stats.roundsCompleted++;
     app.stats.completionStreak++;
     app.stats.targetWordsFound += snap.foundTargets.length;
     if (app.meta.mode === 'journey' && !app.progression.completedStages.includes(descriptor.id)) {
       app.progression.completedStages.push(descriptor.id);
-      progressionText = `Journey progress: ${app.progression.completedStages.length}/${content.JOURNEY.length} stages.`;
+      progressionText.push([N('Journey progress: {done}/{total} stages.'), { done: app.progression.completedStages.length, total: content.JOURNEY.length }]);
     }
     if (descriptor.index != null && descriptor.index + 1 < content.JOURNEY.length) {
-      progressionText += ' Next stage unlocked.';
+      progressionText.push([N('Next stage unlocked.')]);
     }
   } else {
     app.stats.completionStreak = 0;
@@ -212,7 +218,7 @@ async function showResults() {
 
   // Daily rounds: personal best is always kept locally (and cloud-mirrored);
   // the board comparison depends on the environment.
-  let comparison = '';
+  let comparison = [];
   if (app.meta.mode === 'daily') {
     const prev = app.boards.daily[descriptor.seed];
     const isBest = !prev || snap.score.total > prev.score;
@@ -225,7 +231,7 @@ async function showResults() {
       persist('boards', app.boards);
     }
     const best = app.boards.daily[descriptor.seed];
-    const bestText = `Your best today: ${best.score}.`;
+    const bestText = [N('Your best today: {score}.'), { score: best.score }];
 
     if (platform.active) {
       // Top entry of the game's default platform board (the high-score board).
@@ -233,15 +239,15 @@ async function showResults() {
         const board = await platform.fetchLeaderboard();
         if (board && board.entries && board.entries.length) {
           const top = board.entries[0];
-          comparison = `High-score board: top ${top.name} ${top.score} (${board.entries.length} shown). ${bestText}`;
+          comparison = [[N('High-score board: top {name} {score} ({n} shown).'), { name: top.name, score: top.score, n: board.entries.length }], bestText];
         } else {
-          comparison = `Global board unavailable — score kept locally. ${bestText}`;
+          comparison = [[N('Global board unavailable — score kept locally.')], bestText];
         }
       } catch {
-        comparison = `Leaderboard unavailable — score kept locally. ${bestText}`;
+        comparison = [[N('Leaderboard unavailable — score kept locally.')], bestText];
       }
     } else {
-      comparison = 'Score kept on this device. ' + bestText;
+      comparison = [[N('Score kept on this device.')], bestText];
     }
   }
 
@@ -295,7 +301,7 @@ function showTitle() {
 function prepareRound(descriptor, meta) {
   cancelPrepare();
   setState('preparing', meta.mode);
-  app.ui.showPreparing(meta.modeLabel, 3);
+  app.ui.showPreparing(meta, 3);
   app.prepareTimer = setTimeout(() => {
     app.prepareTimer = null;
     startRound(descriptor, meta);
@@ -313,20 +319,20 @@ function cancelPrepare() {
 const handlers = {
   onPlayJourney(i) {
     const d = content.JOURNEY[i];
-    prepareRound(d, { mode: 'journey', modeLabel: `Journey stage ${i + 1} — ${d.tier}`, descriptor: d });
+    prepareRound(d, { mode: 'journey', modeLabel: `Journey stage ${i + 1} — ${d.tier}`, modeKey: [N('Journey stage {n} — {tier}'), { n: i + 1, tier: d.tier }], descriptor: d });
   },
   onPlayDaily() {
     const date = content.todayISO(nowMs());
     const d = content.deriveDaily(date);
-    prepareRound(d, { mode: 'daily', modeLabel: `Daily Pantry — ${date}`, descriptor: d });
+    prepareRound(d, { mode: 'daily', modeLabel: `Daily Pantry — ${date}`, modeKey: [N('Daily Pantry — {date}'), { date }], descriptor: d });
   },
   onPlayPractice(diff) {
     const d = content.derivePractice(diff, Math.floor(nowMs() / 60000));
-    prepareRound(d, { mode: 'practice', modeLabel: `Practice — ${diff}`, descriptor: d });
+    prepareRound(d, { mode: 'practice', modeLabel: `Practice — ${diff}`, modeKey: [N('Practice — {difficulty}'), { difficulty: diff }], descriptor: d });
   },
   onPlayChallenge(id) {
     const d = content.CHALLENGES.find((c) => c.id === id);
-    prepareRound(d, { mode: 'challenge', modeLabel: `Challenge — ${d.challenge}`, descriptor: d });
+    prepareRound(d, { mode: 'challenge', modeLabel: `Challenge — ${d.challenge}`, modeKey: [N('Challenge — {challenge}'), { challenge: d.challenge }], descriptor: d });
   },
   onPlayLesson(id) {
     const lesson = content.LESSONS.find((l) => l.id === id);
@@ -336,7 +342,7 @@ const handlers = {
       mechanics: { moveLimit: null, undo: true, shuffle: true, hints: 3 },
       par: { timeMs: 600000, moves: 30 }, theme: 'classic',
     };
-    prepareRound(d, { mode: 'learn', modeLabel: `Learn — ${lesson.title}`, descriptor: d, lesson });
+    prepareRound(d, { mode: 'learn', modeLabel: `Learn — ${lesson.title}`, modeKey: [N('Learn — {lesson}'), { lesson: lesson.title }], descriptor: d, lesson });
   },
   onResume() {
     const session = Session.restoreSnapshot();
@@ -346,6 +352,7 @@ const handlers = {
     app.meta = session.meta || {
       mode: stage ? 'journey' : 'resumed',
       modeLabel: stage ? `Journey stage ${stage.index + 1} — ${stage.tier}` : 'Resumed round',
+      modeKey: stage ? [N('Journey stage {n} — {tier}'), { n: stage.index + 1, tier: stage.tier }] : [N('Resumed round')],
       descriptor: session.descriptor, lesson: null,
     };
     session.meta = app.meta;
@@ -419,7 +426,7 @@ async function boot() {
     if (e.target && e.target !== window) return;
     console.error(e.error || e.message);
     if (app.ui && app.state !== 'boot') {
-      app.ui.showError('A recoverable error occurred. Your round state is saved.', () => {
+      app.ui.showError(N('A recoverable error occurred. Your round state is saved.'), () => {
         if (app.session) app.session.saveSnapshot();
         showTitle();
       });
@@ -450,6 +457,18 @@ async function boot() {
 
   const settings = loadSettings();
   app.ui = new UI(uiRoot, handlers);
+  // A language change re-renders the open screen, dialog and HUD in place.
+  onLanguage(() => { app.ui.relocalize(); updatePlayerStatus(); });
+  // Another device saved first: platform.js merged the cloud doc into the local
+  // keys; pick the merged progress up in memory.
+  platform.onMerged = () => {
+    app.progression = loadProgression();
+    app.tutorial = loadTutorial();
+    app.stats = loadStats();
+    app.achievements = loadAchievements();
+    app.boards = loadBoards();
+    if (app.state === 'title') showTitle();
+  };
   platform.onStatus = () => updatePlayerStatus();
   updatePlayerStatus();
   const refreshAccount = () => app.ui.setAccount({ canSignIn: platform.canSignIn(), canInvite: platform.active });
@@ -478,11 +497,11 @@ async function boot() {
     graphics: settings.gfx,
     reducedMotion: settings.reducedMotion,
     onContextLost: () => {
-      app.ui.announce('Graphics context lost — restoring…', true);
+      app.ui.announce(N('Graphics context lost — restoring…'), true);
     },
     onContextRestored: () => {
       if (app.session) app.renderer.update(app.session.snapshot());
-      app.ui.announce('Graphics restored.');
+      app.ui.announce(N('Graphics restored.'));
     },
   });
   if (!app.renderer.available) {
