@@ -5,6 +5,7 @@
 const EN = {
   graphics: 'Graphics',
   quality: 'Quality',
+  level: 'Level {level}',
   auto: 'Auto (detected: {tier})',
   renderScale: 'Render scale',
   fromPreset: 'From preset ({tier})',
@@ -22,7 +23,7 @@ const EN = {
 };
 
 const ES = {
-  graphics: 'Gráficos', quality: 'Calidad', auto: 'Automática (detectada: {tier})',
+  graphics: 'Gráficos', quality: 'Calidad', level: 'Nivel {level}', auto: 'Automática (detectada: {tier})',
   renderScale: 'Escala de renderizado', fromPreset: 'Según el ajuste ({tier})',
   adaptive: 'Resolución adaptativa', showFps: 'Mostrar fotogramas por segundo',
   postUnavailable: 'El posprocesado no está disponible en este dispositivo; la escena se dibuja sin él.',
@@ -36,7 +37,7 @@ const ES = {
 };
 
 const FR = {
-  graphics: 'Graphismes', quality: 'Qualité', auto: 'Auto (détectée : {tier})',
+  graphics: 'Graphismes', quality: 'Qualité', level: 'Niveau {level}', auto: 'Auto (détectée : {tier})',
   renderScale: 'Échelle de rendu', fromPreset: 'Selon le préréglage ({tier})',
   adaptive: 'Résolution adaptative', showFps: 'Afficher les images par seconde',
   postUnavailable: 'Le post-traitement est indisponible sur cet appareil ; la scène est affichée sans.',
@@ -55,7 +56,7 @@ export const GFX_STRINGS = {
   'es-419': ES,
   'es-ES': { ...ES, renderScale: 'Escala de renderizado', showFps: 'Mostrar FPS' },
   'de-DE': {
-    graphics: 'Grafik', quality: 'Qualität', auto: 'Automatisch (erkannt: {tier})',
+    graphics: 'Grafik', quality: 'Qualität', level: 'Stufe {level}', auto: 'Automatisch (erkannt: {tier})',
     renderScale: 'Renderskalierung', fromPreset: 'Laut Voreinstellung ({tier})',
     adaptive: 'Adaptive Auflösung', showFps: 'Bildrate anzeigen',
     postUnavailable: 'Nachbearbeitung ist auf diesem Gerät nicht verfügbar; die Szene wird ohne sie dargestellt.',
@@ -70,7 +71,7 @@ export const GFX_STRINGS = {
   'fr-FR': FR,
   'fr-CA': { ...FR, showFps: 'Afficher la fréquence d’images' },
   'pt-BR': {
-    graphics: 'Gráficos', quality: 'Qualidade', auto: 'Automática (detectada: {tier})',
+    graphics: 'Gráficos', quality: 'Qualidade', level: 'Nível {level}', auto: 'Automática (detectada: {tier})',
     renderScale: 'Escala de renderização', fromPreset: 'Conforme a predefinição ({tier})',
     adaptive: 'Resolução adaptativa', showFps: 'Mostrar taxa de quadros',
     postUnavailable: 'O pós-processamento não está disponível neste dispositivo; a cena é desenhada sem ele.',
@@ -83,7 +84,7 @@ export const GFX_STRINGS = {
     t_detailed: 'Detalhado', t_static: 'Estático', t_animated: 'Animado',
   },
   'it-IT': {
-    graphics: 'Grafica', quality: 'Qualità', auto: 'Automatica (rilevata: {tier})',
+    graphics: 'Grafica', quality: 'Qualità', level: 'Livello {level}', auto: 'Automatica (rilevata: {tier})',
     renderScale: 'Scala di rendering', fromPreset: 'Da preimpostazione ({tier})',
     adaptive: 'Risoluzione adattiva', showFps: 'Mostra frequenza fotogrammi',
     postUnavailable: 'La post-elaborazione non è disponibile su questo dispositivo; la scena viene disegnata senza.',

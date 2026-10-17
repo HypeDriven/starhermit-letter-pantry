@@ -36,7 +36,8 @@ hiding in that tray has been served.
 | `session.js` | Session orchestration: command ids, monotonic clock, replay envelope, checksummed `localStorage` |
 | `ui.js` | Every screen, overlay, control and ARIA live region; settings persistence, including the Graphics section |
 | `render.js` | Three.js presentation layer: pantry scene, biscuits, particles, lighting, lazily loaded post-processing, adaptive resolution; applies graphics settings live; no-ops entirely if WebGL or `THREE` is absent |
-| `gfx.js` | Pure graphics quality model: presets, per-category tiers, GPU detection, `resolve()`, `choosePreset()`, `presetTier()`, `describe()` |
+| `gfx.js` | Pure graphics quality model: presets, per-category tiers, per-preset budgets (`BUDGETS`, `budget()`), hardware level → preset (`LEVELS`, `detectLevel()`, `presetForLevel()`, `detectPreset()`), `resolve()`, `choosePreset()`, `presetTier()`, `describe()` |
+| `gpu-level.js` | Shared StarHermit hardware-level detector (`window.StarHermitGpu`; copy of the canonical tools file, not edited here) |
 | `gfx-i18n.js` | Graphics-section strings in the nine product locales, picked for the game language |
 | `vendor/` | `three.module.min.js` (r170) and `three/addons/` (r170 post-processing passes, shaders, `RoomEnvironment`) |
 | `audio.js` | WebAudio: sample one-shots from `sfx/`, synth fallbacks, three buses, adaptive music bed |
@@ -359,14 +360,13 @@ debossed letter, toasted rims, docking holes and a light clearcoat), GTAO ambien
 limited to highlights (threshold 0.9: the selection glow and sparks), a colour grade (S-curve,
 slight saturation, warm highlights) with vignette, FXAA/SMAA/MSAA anti-aliasing, spark and dust
 particles, and ambient motion (idle bob, dust drift, bulb shimmer). The Settings screen's
-**Graphics** section offers a quality preset (Auto, chosen from the detected GPU — software
-renderers get Low, discrete GPUs and Apple M-series get High, others Balanced, touch-first devices
-at most Balanced; Low; Balanced; High; Ultra), a render scale (50–200% of the preset's), a
+**Graphics** section offers a quality preset (Auto, chosen from the StarHermit hardware level
+below; Low; Balanced; High; Ultra), a render scale (50–200% of the preset's), a
 per-effect override for each of shadows, ambient occlusion, bloom, colour grade, anti-aliasing,
 reflections, surface detail, particles and ambient motion ("From preset (…)" by default; choosing
 a preset clears overrides), adaptive resolution (steps the resolution down to 60% when frames
 average over 26 ms and back up under 14 ms), a frame-rate readout (bottom-left, non-interactive)
-and a summary line "GPU · cost · W×H px". Pixel ratio is `min(devicePixelRatio, cap)` × preset scale ×
+and a summary line "GPU · Level N · cost · W×H px" (the level label localized). Pixel ratio is `min(devicePixelRatio, cap)` × preset scale ×
 render scale × adaptive scale, with caps Low 1, Balanced 1.5, High/Ultra 2. Changes apply
 immediately without reload and persist in `settings.gfx`; the chosen preset is mirrored to
 `data-gfx-preset` on `<body>` and the canvas. The post chain (EffectComposer → RenderPass → GTAO →
@@ -374,6 +374,44 @@ UnrealBloom → grade → OutputPass → SMAA/FXAA) is loaded lazily from `vendo
 only runs when a post effect is on, so Low (no shadows, plain surfaces, no post, no particles,
 DPR 1 × 0.85) is cheaper than the previous default. If the post chain cannot load or build, the
 scene renders without it and the Graphics section says so.
+
+**Hardware level and Auto.** `gpu-level.js` (the shared StarHermit detector, `window.StarHermitGpu`,
+loaded as a classic script before `bootstrap.js`) rates the GPU 0–20 (0 = Galaxy S20 / Intel UHD or
+weaker, 20 = RTX 5090, each level ≈ 1.23× the one below; laptop parts two levels lower; phones,
+tablets and ≤ 4 GB machines capped at 9; software renderers 0). Auto picks **Low from 0, Balanced
+from 4, High from 10, Ultra from 17**, so strong desktop GPUs get Ultra; adaptive resolution still
+steps down when frames are slow. On phones and tablets the shared frame-rate option paces Auto at
+half the display refresh rate and starts at 16 simultaneous sounds.
+
+**Per-preset budgets** (`BUDGETS` in `gfx.js`; each tuned to hold 60 FPS on the weakest GPU Auto
+gives it — Low: level 0 phones / Intel UHD, Balanced: level 4 Iris Xe, High: level 10 GTX 1070,
+Ultra: level 17 RTX 4080). Gameplay is identical on every preset.
+
+| Preset | Materials (biscuits, wood, jars, tins) | Wood / letter face / dough texture | Geometry LOD | Sparks (× bursts and cap) | Dust motes | Bloom / GTAO resolution |
+|---|---|---|---|---|---|---|
+| Low | Lambert | 256×128 / 128 / 64 px | ½ | 0.5× | ½ | ½ / ½ |
+| Balanced | Standard | 512×256 / 256 / 128 px | ¾ | 0.75× | ¾ | ½ / ½ |
+| High | Physical (clearcoat biscuits, glass jars) with Surface detail | 512×256 / 256 / 128 px | 1 | 1× | full | ½ / ½ |
+| Ultra | Physical (clearcoat biscuits, glass jars) with Surface detail | 1024×512 / 512 / 256 px | 1.5 | 1.5× | full | full / full |
+
+Geometry LOD multiplies the biscuit bevel and curve segments, the jar, contents, lid, label and tin
+segments and the selection ring. Sparks scale within the preset by the hardware level
+(`StarHermitGpu.scaleBudget`, ≤ 2×; fewer below the floor). The environment, biscuits and their
+textures are rebuilt when the preset changes. Bloom and GTAO run at a fraction of the frame through
+a wrapped pass `setSize`.
+
+**60 FPS benchmark** (`node tools/gfx-bench.mjs letter-pantry [--mobile --presets low,balanced]`,
+dev-only, real GPUs; hook `tests/gfx-bench.mjs` picks the preset in Settings → Graphics, starts
+Journey stage 1 and keeps lifting, clearing and shuffling biscuits and spelling the target words
+with Submit, retrying a finished stage). Measured 2026-10-17 (an AMD Radeon iGPU at level 2
+projected to each preset's floor level, the same page with draws skipped subtracted; typical p50
+≤ 12 ms and slow p90 ≤ 14 ms, CPU p90 ≤ 6 ms on the NVIDIA run):
+
+- Desktop 1920×1080: PASS low (typical 0.00, slow 0.93 ms at level 0; CPU 0.70 ms); PASS balanced
+  (typical 1.93, slow 3.21 ms at level 4; CPU 1.20 ms); PASS high (typical 1.87, slow 3.07 ms at
+  level 10; CPU 1.50 ms); PASS ultra (typical 4.43, slow 4.67 ms at level 17; CPU 1.60 ms).
+- Mobile 390×844 @3×: PASS low (typical 0.00, slow 0.00 ms at level 0; CPU 0.70 ms); PASS balanced
+  (typical 0.00, slow 3.54 ms at level 4; CPU 1.60 ms).
 
 | Preset | Shadows | AO | Bloom | Grade | AA | Reflections | Detail | Particles | Motion | Scale |
 |---|---|---|---|---|---|---|---|---|---|---|
@@ -606,14 +644,15 @@ platform adapter behavior over the real SDK with a stubbed fetch (fragment token
 Bearer, profile nickname, `game:<slug>` cloud-save round-trip, settings KV changed-key patch,
 invite link, zero fetches standalone, sign-in offered on the UUID platform host, a stale conditional write (412) that reloads, merges and saves again, `ui.*` keys kept out of game settings); client/server daily parity; that score validation accepts a valid replay and rejects a
 tampered one; that the server blocks path traversal and 404s as JSON; and the graphics model —
-`detectPreset` on sample GPU strings (software → Low, discrete/Apple M → High, touch capped at
-Balanced), `resolve()` with presets, overrides, invalid values and the 50–200% scale clamp,
+the hardware level → preset mapping (SwiftShader / llvmpipe / `Radeon Graphics` / UHD → Low, Iris
+Xe → Balanced, GTX 1070 → High, RTX 4080 / 5090 → Ultra, phones and tablets Balanced at most), the
+per-preset budget table and its level scaling, `resolve()` with presets, overrides, invalid values and the 50–200% scale clamp,
 `choosePreset()` clearing overrides, and Graphics strings present in all nine locales.
 
 **`npm run test:e2e` → `tests/e2e.mjs`**, both viewports, 14 steps: title renders its four named
 buttons; settings open, reduced motion reaches `<body>`, the music slider responds to a real key
 press and the theme row is populated; in the Graphics section Auto reads "detected: Low" on the
-software GPU, Ultra applies (4096² shadows in the summary) without console noise, Low then High
+software GPU and the summary names Level 0, Ultra applies (4096² shadows in the summary) without console noise, Low then High
 set `data-gfx-preset`, a shadows override shows "no shadows" in the summary, the render-scale
 slider answers a key press, the frame-rate readout appears, the section fits the viewport, and
 preset + override + toggle survive a reload, after which choosing Auto clears the override; help opens and

@@ -9,7 +9,7 @@
 
 import { themeById } from './content.js';
 import { makeStreams } from './rules.js';
-import { resolve, detectPreset, describe, SHADOW_MAP, PARTICLE_CAP, DUST_COUNT } from './gfx.js';
+import { resolve, detectLevel, presetForLevel, describe, SHADOW_MAP, PARTICLE_CAP, DUST_COUNT } from './gfx.js';
 
 // Named camera framing constants (no magic offsets).
 export const FRAMING = {
@@ -88,10 +88,13 @@ function shade(c, f) {
 }
 function rgba(c, a) { return `rgba(${(c >> 16) & 255},${(c >> 8) & 255},${c & 255},${a})`; }
 
-function woodCanvas(base, rng, w = 512, h = 256, planks = 0) {
+// Drawn in 512 × 256 units at the preset budget's width `px` (height ½).
+function woodCanvas(base, rng, px = 512, planks = 0) {
+  const w = 512, h = 256;
   const c = document.createElement('canvas');
-  c.width = w; c.height = h;
+  c.width = px; c.height = px / 2;
   const g = c.getContext('2d');
+  g.scale(px / w, px / w);
   g.fillStyle = hex(base); g.fillRect(0, 0, w, h);
   const lanes = planks || 1;
   const lw = w / lanes;
@@ -137,10 +140,36 @@ export function createRenderer(canvas, opts = {}) {
   }
 
   const gpu = gpuName(renderer.getContext());
-  const detected = detectPreset(gpu, { mobile: isTouchDevice() });
+  // StarHermit hardware level → Auto preset (SwiftShader = level 0 → Low; phones cap at Balanced).
+  const G = globalThis.StarHermitGpu;
+  const system = G ? G.detectSystem() : {};
+  const level = detectLevel(gpu, { ...system, mobile: !!system.mobile || isTouchDevice() });
+  const detected = presetForLevel(level);
+
+  // Run a post pass at a fraction of the frame (per-preset budget). EffectComposer sizes every pass to
+  // the full frame in addPass/setSize, so the pass's own setSize is wrapped to apply the scale.
+  const atScale = (pass, k) => {
+    if (!(k > 0 && k < 1)) return pass;
+    const setSize = pass.setSize.bind(pass);
+    pass.setSize = (w, h) => setSize(Math.max(1, Math.round(w * k)), Math.max(1, Math.round(h * k)));
+    return pass;
+  };
+  // Geometry LOD: segment counts scaled by the preset budget (`segments`), never below `min`.
+  const seg = (n, min = 3) => Math.max(min, Math.round(n * state.q.budget.segments));
+  // Material class per budget: Lambert (Low), Standard (Balanced), Physical where `phys` is given
+  // (High/Ultra; otherwise Standard).
+  const mat = (params, phys) => {
+    const kind = state.q.budget.material;
+    if (kind === 'lambert') {
+      const { roughness, metalness, envMapIntensity, clearcoat, clearcoatRoughness, ...rest } = params;
+      return new THREE.MeshLambertMaterial(rest);
+    }
+    if (kind === 'physical' && phys) return new THREE.MeshPhysicalMaterial({ ...params, ...phys });
+    return new THREE.MeshStandardMaterial(params);
+  };
 
   const state = {
-    q: resolve({}, detected),
+    q: resolve({}, detected, level),
     savedJson: null,
     reducedMotion: false,
     theme: themeById(opts.theme || 'classic'),
@@ -238,9 +267,9 @@ export function createRenderer(canvas, opts = {}) {
       envParts.push(mesh); groups.environment.add(mesh); return mesh;
     };
     const wood = (base, repeat, planks, extra = {}) => {
-      if (!detailed) return new THREE.MeshStandardMaterial({ color: base, roughness: extra.roughness ?? 0.8, metalness: 0.02 });
-      const tex = canvasTex(woodCanvas(base, rng, 512, 256, planks), repeat);
-      return new THREE.MeshStandardMaterial({ map: tex, bumpMap: tex, bumpScale: 1.2, roughness: extra.roughness ?? 0.72, metalness: 0.02 });
+      if (!detailed) return mat({ color: base, roughness: extra.roughness ?? 0.8, metalness: 0.02 });
+      const tex = canvasTex(woodCanvas(base, rng, state.q.budget.wood, planks), repeat);
+      return mat({ map: tex, bumpMap: tex, bumpScale: 1.2, roughness: extra.roughness ?? 0.72, metalness: 0.02 });
     };
 
     // Back wall: vertical boards.
@@ -254,7 +283,7 @@ export function createRenderer(canvas, opts = {}) {
     const counter = add(new THREE.Mesh(new THREE.BoxGeometry(34, 0.4, 7.8), counterMat));
     counter.position.set(0, -0.5, -0.7);
     const cabinet = add(new THREE.Mesh(new THREE.BoxGeometry(34, 14, 0.4),
-      new THREE.MeshStandardMaterial({ color: shade(theme.shelf, -0.35), roughness: 0.85 })));
+      mat({ color: shade(theme.shelf, -0.35), roughness: 0.85 })));
     cabinet.position.set(0, -7.7, 3.0);
 
     // Upper shelves with brackets.
@@ -281,31 +310,32 @@ export function createRenderer(canvas, opts = {}) {
       const z = -3.6 + (rng() - 0.5) * 0.5;
       const base = 3.42;
       if (!detailed) {
-        const jar = add(new THREE.Mesh(new THREE.CylinderGeometry(r, r + 0.02, h, 16),
-          new THREE.MeshStandardMaterial({ color, roughness: 0.5, metalness: 0.1 })), true);
+        const jar = add(new THREE.Mesh(new THREE.CylinderGeometry(r, r + 0.02, h, seg(16, 8)),
+          mat({ color, roughness: 0.5, metalness: 0.1 })), true);
         jar.position.set(x, base + h / 2, z);
         continue;
       }
       // Contents, glass shell, lid and paper label.
-      const fill = add(new THREE.Mesh(new THREE.CylinderGeometry(r * 0.9, r * 0.9, h * (0.55 + rng() * 0.35), 20),
-        new THREE.MeshStandardMaterial({ color, roughness: 0.85 })), true);
+      const fill = add(new THREE.Mesh(new THREE.CylinderGeometry(r * 0.9, r * 0.9, h * (0.55 + rng() * 0.35), seg(20, 8)),
+        mat({ color, roughness: 0.85 })), true);
       fill.geometry.translate(0, fill.geometry.parameters.height / 2, 0);
       fill.position.set(x, base + 0.02, z);
-      const glass = add(new THREE.Mesh(new THREE.CylinderGeometry(r, r, h, 24, 1, true),
-        new THREE.MeshPhysicalMaterial({ color: 0xe8f2f0, roughness: 0.08, metalness: 0, transparent: true, opacity: 0.28, clearcoat: 1, clearcoatRoughness: 0.08, envMapIntensity: 1.6, side: THREE.DoubleSide, depthWrite: false })), false, false);
+      const glass = add(new THREE.Mesh(new THREE.CylinderGeometry(r, r, h, seg(24, 8), 1, true),
+        mat({ color: 0xe8f2f0, roughness: 0.08, metalness: 0, transparent: true, opacity: 0.28, envMapIntensity: 1.6, side: THREE.DoubleSide, depthWrite: false },
+          { clearcoat: 1, clearcoatRoughness: 0.08 })), false, false);
       glass.position.set(x, base + h / 2, z);
-      const lid = add(new THREE.Mesh(new THREE.CylinderGeometry(r * 1.04, r * 1.04, 0.14, 24),
-        new THREE.MeshStandardMaterial({ color: lidColors[i % lidColors.length], roughness: 0.3, metalness: 0.85 })), true);
+      const lid = add(new THREE.Mesh(new THREE.CylinderGeometry(r * 1.04, r * 1.04, 0.14, seg(24, 8)),
+        mat({ color: lidColors[i % lidColors.length], roughness: 0.3, metalness: 0.85 })), true);
       lid.position.set(x, base + h + 0.07, z);
-      const label = add(new THREE.Mesh(new THREE.CylinderGeometry(r * 1.01, r * 1.01, h * 0.28, 24, 1, true, -0.9, 1.8),
-        new THREE.MeshStandardMaterial({ color: 0xf1e3c4, roughness: 0.9 })));
+      const label = add(new THREE.Mesh(new THREE.CylinderGeometry(r * 1.01, r * 1.01, h * 0.28, seg(24, 8), 1, true, -0.9, 1.8),
+        mat({ color: 0xf1e3c4, roughness: 0.9 })));
       label.position.set(x, base + h * 0.45, z);
     }
     // Tins on the high shelf.
     for (let i = 0; i < 6; i++) {
       const h = 0.8 + rng() * 0.5;
-      const tin = add(new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.42, h, detailed ? 28 : 14),
-        new THREE.MeshStandardMaterial({ color: jarColors[(i + 2) % jarColors.length], roughness: detailed ? 0.35 : 0.5, metalness: detailed ? 0.6 : 0.15 })), true);
+      const tin = add(new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.42, h, detailed ? seg(28, 10) : 14),
+        mat({ color: jarColors[(i + 2) % jarColors.length], roughness: detailed ? 0.35 : 0.5, metalness: detailed ? 0.6 : 0.15 })), true);
       tin.position.set(-7.5 + i * 3 + (rng() - 0.5), 6.62 + h / 2, -3.8);
     }
 
@@ -352,10 +382,11 @@ export function createRenderer(canvas, opts = {}) {
   // detailed tier; a matching greyscale bump map debosses the letter.
   const textureCache = new Map();
   function letterTextures(letter, theme, detailed) {
-    const key = letter + ':' + theme.id + ':' + (detailed ? 'd' : 'p');
+    const px = state.q.budget.letter; // preset budget: face texture size, drawn in 256-px units
+    const key = letter + ':' + theme.id + ':' + (detailed ? 'd' : 'p') + ':' + px;
     if (textureCache.has(key)) return textureCache.get(key);
     const S = 256;
-    const mk = () => { const c = document.createElement('canvas'); c.width = c.height = S; return c; };
+    const mk = () => { const c = document.createElement('canvas'); c.width = c.height = px; c.getContext('2d').scale(px / S, px / S); return c; };
     const c = mk();
     const ctx = c.getContext('2d');
     ctx.fillStyle = hex(theme.biscuit);
@@ -407,11 +438,13 @@ export function createRenderer(canvas, opts = {}) {
 
   let doughTex = null;
   function doughTexture(theme) {
-    if (doughTex && doughTex.userData.theme === theme.id) return doughTex;
+    const px = state.q.budget.dough; // preset budget: side texture size, drawn in 128-px units
+    if (doughTex && doughTex.userData.theme === theme.id && doughTex.image.width === px) return doughTex;
     doughTex && doughTex.dispose();
     const c = document.createElement('canvas');
-    c.width = c.height = 128;
+    c.width = c.height = px;
     const g = c.getContext('2d');
+    g.scale(px / 128, px / 128);
     g.fillStyle = hex(shade(theme.biscuit, -0.12)); g.fillRect(0, 0, 128, 128);
     speckle(g, 128, 128, makeStreams('dough').decoration, theme.biscuit, 90);
     doughTex = new THREE.CanvasTexture(c);
@@ -422,10 +455,18 @@ export function createRenderer(canvas, opts = {}) {
     return doughTex;
   }
 
-  const biscuitGeo = new THREE.ExtrudeGeometry(roundedRectShape(FRAMING.biscuitSize, 0.22),
-    { depth: 0.22, bevelEnabled: true, bevelThickness: 0.06, bevelSize: 0.05, bevelSegments: 3, curveSegments: 8 });
-  biscuitGeo.rotateX(-Math.PI / 2);
-  const markerGeo = new THREE.RingGeometry(0.55, 0.72, 32);
+  // Biscuit and marker geometry follow the preset's geometry LOD (rebuilt with the biscuits).
+  let biscuitGeo = null, markerGeo = null, geoLod = 0;
+  function biscuitGeometry() {
+    const k = state.q.budget.segments;
+    if (biscuitGeo && geoLod === k) return;
+    biscuitGeo && biscuitGeo.dispose(); markerGeo && markerGeo.dispose();
+    geoLod = k;
+    biscuitGeo = new THREE.ExtrudeGeometry(roundedRectShape(FRAMING.biscuitSize, 0.22),
+      { depth: 0.22, bevelEnabled: true, bevelThickness: 0.06, bevelSize: 0.05, bevelSegments: seg(3, 1), curveSegments: seg(8, 3) });
+    biscuitGeo.rotateX(-Math.PI / 2);
+    markerGeo = new THREE.RingGeometry(0.55, 0.72, seg(32, 16));
+  }
   const restY = 0.08 + 0.5 * Math.sin(FRAMING.biscuitTilt);
 
   function buildBiscuits(letters, theme) {
@@ -436,24 +477,24 @@ export function createRenderer(canvas, opts = {}) {
       b.marker.material.dispose();
     }
     state.biscuits = [];
+    biscuitGeometry();
     const detailed = state.q.detail === 'detailed';
     const n = letters.length;
     const span = n * (FRAMING.biscuitSize + FRAMING.biscuitGap) - FRAMING.biscuitGap;
     letters.forEach((letter, i) => {
       const tex = letterTextures(letter, theme, detailed);
       const topMat = detailed
-        ? new THREE.MeshPhysicalMaterial({
+        ? mat({
           color: 0xffffff, map: tex.map, bumpMap: tex.bump, bumpScale: 2.5, roughness: 0.62,
-          clearcoat: 0.3, clearcoatRoughness: 0.5,
           emissive: new THREE.Color(theme.accent), emissiveMap: tex.map, emissiveIntensity: 0,
-        })
-        : new THREE.MeshStandardMaterial({
+        }, { clearcoat: 0.3, clearcoatRoughness: 0.5 })
+        : mat({
           color: 0xffffff, map: tex.map, roughness: 0.55,
           emissive: new THREE.Color(theme.accent), emissiveMap: tex.map, emissiveIntensity: 0,
         });
       const sideMat = detailed
-        ? new THREE.MeshPhysicalMaterial({ color: 0xffffff, map: doughTexture(theme), roughness: 0.7, clearcoat: 0.15, clearcoatRoughness: 0.6 })
-        : new THREE.MeshStandardMaterial({ color: shade(theme.biscuit, -0.12), roughness: 0.6 });
+        ? mat({ color: 0xffffff, map: doughTexture(theme), roughness: 0.7 }, { clearcoat: 0.15, clearcoatRoughness: 0.6 })
+        : mat({ color: shade(theme.biscuit, -0.12), roughness: 0.6 });
       const mesh = new THREE.Mesh(biscuitGeo, [topMat, sideMat]);
       const x = -span / 2 + FRAMING.biscuitSize / 2 + i * (FRAMING.biscuitSize + FRAMING.biscuitGap);
       mesh.position.set(x, restY, 0);
@@ -485,7 +526,7 @@ export function createRenderer(canvas, opts = {}) {
   }
   const spriteTex = new THREE.CanvasTexture(spriteCanvas);
 
-  const MAX_PARTICLES = PARTICLE_CAP.high;
+  const MAX_PARTICLES = PARTICLE_CAP.high * 3; // budget sparks ≤ 1.5 × level scaling ≤ 2
   const particleGeo = new THREE.BufferGeometry();
   const particlePos = new Float32Array(MAX_PARTICLES * 3);
   particleGeo.setAttribute('position', new THREE.BufferAttribute(particlePos, 3));
@@ -521,7 +562,7 @@ export function createRenderer(canvas, opts = {}) {
   groups.effects.add(dust);
 
   function updateDust(time, moving) {
-    const n = DUST_COUNT[state.q.particles] || 0;
+    const n = Math.round((DUST_COUNT[state.q.particles] || 0) * state.q.budget.dust); // × preset budget `dust`
     dust.visible = n > 0;
     if (!n) return;
     for (let i = 0; i < n; i++) {
@@ -536,7 +577,10 @@ export function createRenderer(canvas, opts = {}) {
   }
 
   function burst(x, y, z, count) {
-    const cap = PARTICLE_CAP[state.q.particles] || 0;
+    // Burst cap and counts × the preset budget's sparks factor (pool sized for the largest).
+    const k = state.q.budget.sparks;
+    const cap = Math.min(MAX_PARTICLES, Math.round((PARTICLE_CAP[state.q.particles] || 0) * k));
+    count = Math.round(count * k);
     if (cap === 0 || state.reducedMotion) return;
     const n = Math.max(0, Math.min(count, cap - activeParticles));
     for (let i = 0; i < n; i++) {
@@ -600,8 +644,10 @@ export function createRenderer(canvas, opts = {}) {
     if (json === state.savedJson) return;
     const prev = state.q;
     state.savedJson = json;
-    const q = resolve(saved || {}, detected);
+    const q = resolve(saved || {}, detected, level);
     state.q = q;
+    const pb = prev.budget || {}, b = q.budget;
+    const budgetChanged = pb.material !== b.material || pb.wood !== b.wood || pb.letter !== b.letter || pb.dough !== b.dough || pb.segments !== b.segments;
     const size = SHADOW_MAP[q.shadows];
     const shadowsChanged = renderer.shadowMap.enabled !== size > 0;
     renderer.shadowMap.enabled = size > 0;
@@ -611,7 +657,7 @@ export function createRenderer(canvas, opts = {}) {
       if (keyLight.shadow.map) { keyLight.shadow.map.dispose(); keyLight.shadow.map = null; }
     }
     if (shadowsChanged) scene.traverse((o) => { if (o.material) for (const m of [].concat(o.material)) m.needsUpdate = true; });
-    if (prev.detail !== q.detail || !state.built) {
+    if (prev.detail !== q.detail || budgetChanged || !state.built) {
       state.built = true;
       buildEnvironment(state.theme);
       const snap = state.snapshot || idleSnapshot;
@@ -659,7 +705,7 @@ export function createRenderer(canvas, opts = {}) {
       c.setSize(w, h);
       c.addPass(new post.RenderPass(scene, camera));
       if (q.ao !== 'off') {
-        const ao = new post.GTAOPass(scene, camera, W, H);
+        const ao = atScale(new post.GTAOPass(scene, camera, W, H), q.budget.aoRes);
         ao.output = post.GTAOPass.OUTPUT.Default;
         ao.blendIntensity = 0.7;
         const hi = q.ao === 'high';
@@ -669,7 +715,7 @@ export function createRenderer(canvas, opts = {}) {
       }
       if (q.bloom === 'on') {
         // High threshold: only the selection glow, sparks and bright highlights bloom.
-        c.addPass(new post.UnrealBloomPass(new THREE.Vector2(w, h), 0.4, 0.4, 0.9));
+        c.addPass(atScale(new post.UnrealBloomPass(new THREE.Vector2(w, h), 0.4, 0.4, 0.9), q.budget.bloomRes));
       }
       if (q.grade === 'on') c.addPass(new post.ShaderPass(GradeShader));
       c.addPass(new post.OutputPass());
@@ -848,6 +894,7 @@ export function createRenderer(canvas, opts = {}) {
     const px = [Math.round(size[0] * pixelRatio), Math.round(size[1] * pixelRatio)];
     return {
       gpu: gpu || '',
+      level,
       detected,
       resolved: state.q,
       summary: describe(state.q, px),

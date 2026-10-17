@@ -811,7 +811,7 @@ export class UI {
     };
     const updateSummary = () => {
       const i = info();
-      const text = i ? `${i.gpu || t('gpuUnknown')} · ${localizeSummary(i.summary)}` : t('noWebgl');
+      const text = i ? `${i.gpu || t('gpuUnknown')} · ${t('level', { level: i.level ?? 0 })} · ${localizeSummary(i.summary)}` : t('noWebgl');
       if (summary.textContent !== text) summary.textContent = text;
       note.textContent = t('postUnavailable');
       note.hidden = !(i && i.postFailed);

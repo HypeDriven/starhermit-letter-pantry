@@ -157,6 +157,8 @@ async function playthrough(label, viewport, hasTouch) {
       const bodyPreset = () => page.evaluate(() => document.body.dataset.gfxPreset);
       const summary = () => page.textContent('#gfx-summary');
       if ((await bodyPreset()) !== 'low') throw new Error('auto preset not applied: ' + (await bodyPreset()));
+      // The summary names the StarHermit hardware level (software GPU = level 0).
+      await page.waitForFunction(() => /Level 0/.test(document.getElementById('gfx-summary').textContent));
       // Ultra renders the full post chain; it must not produce console noise.
       await preset.selectOption('ultra');
       await page.waitForFunction(() => document.body.dataset.gfxPreset === 'ultra');
