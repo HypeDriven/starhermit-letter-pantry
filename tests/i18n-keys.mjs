@@ -1,27 +1,24 @@
 // Key extraction for the i18n coverage test (run directly to list the keys).
-// Keys are the US-English source strings: literal T('…') / N('…') calls and the
-// `t:` / `at:` label attributes in the game modules, the content tables' display
-// fields (themes, achievements, lessons, challenges, difficulty tiers) and the
-// audio captions. Words in the puzzles are English dictionary data, not UI text.
+// Keys are the US-English source strings: literal T("…") / N("…") calls in the
+// engine client (native/*.ts) and the content tables' display fields (themes, achievements, lessons,
+// challenges, difficulty tiers). Words in the puzzles are English dictionary
+// data, not UI text.
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { THEMES, ACHIEVEMENTS, LESSONS, CHALLENGES, PRACTICE_DIFFICULTIES } from '../content.js';
 
 const ROOT = new URL('..', import.meta.url).pathname;
-const SKIP = new Set(['i18n.js', 'sh-language.js', 'starhermit-sdk.js', 'game-options.js', 'words.js', 'browser-guard.js', 'ui-scale.js', 'score-script.js', 'server.js', 'gfx-i18n.js', 'sh-strings.js']);
 const unescape = (s) => s.replace(/\\(['"\\])/g, '$1');
 
 export function sourceKeys() {
   const keys = new Set();
-  const call = /(?<![\w.$])(?:T|N)\(\s*(?:'((?:[^'\\\n]|\\.)*)'|"((?:[^"\\\n]|\\.)*)")/g;
-  const attr = /(?<![\w.$])(?:t|at):\s*'((?:[^'\\\n]|\\.)*)'/g;
-  const ternary = /(?<![\w.$])at:\s*[^,{}]*\?\s*'([^']+)'\s*:\s*[^?]*\?\s*'([^']+)'\s*:\s*'([^']+)'/g;
-  const announce = /\.announce\(\s*'((?:[^'\\\n]|\\.)*)'/g;
-  for (const f of readdirSync(ROOT)) {
-    if (!f.endsWith('.js') || SKIP.has(f)) continue;
-    const src = readFileSync(join(ROOT, f), 'utf8');
-    for (const re of [call, attr, announce]) for (const m of src.matchAll(re)) keys.add(unescape(m[1] ?? m[2]));
-    for (const m of src.matchAll(ternary)) { keys.add(m[1]); keys.add(m[2]); keys.add(m[3]); }
+  const lit = String.raw`"((?:[^"\\\n]|\\.)*)"|'((?:[^'\\\n]|\\.)*)'`;
+  const call = new RegExp(String.raw`(?<![\w.$])(?:T|N)\(\s*(?:${lit})`, 'g');
+  const dir = join(ROOT, 'native');
+  for (const f of readdirSync(dir)) {
+    if (!f.endsWith('.ts')) continue;
+    const src = readFileSync(join(dir, f), 'utf8');
+    for (const m of src.matchAll(call)) keys.add(unescape(m[1] ?? m[2]));
   }
   return keys;
 }
@@ -34,8 +31,6 @@ export function contentKeys() {
   for (const l of LESSONS) { add(l.title); for (const st of l.steps) add(st.text); }
   for (const c of CHALLENGES) add(c.challenge);
   for (const d of PRACTICE_DIFFICULTIES) add(d);
-  const audio = readFileSync(join(ROOT, 'audio.js'), 'utf8');
-  for (const m of audio.matchAll(/_say\('([^']+)'\)/g)) add(m[1]);
   return keys;
 }
 

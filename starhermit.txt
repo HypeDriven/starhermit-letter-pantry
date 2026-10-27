@@ -1,9 +1,27 @@
 name=Letter Pantry
 description=Rearrange a tray of letter biscuits to discover every hidden word in a cozy word puzzle.
-launch=index.html
 owner=2712e04e-461b-4d23-81ae-e40b429128a8
 server=score-script.js
 cover=cover.jpg
+
+# StarHermit engine script game: one package, played natively by the
+# StarHermit client and in browsers by the engine's web runtime. Browsers open
+# launch=index.html, the loader `npm run package` writes (it pins the engine
+# on wiki.starhermit.com by hash; never edit it). Re-run `npm run package`
+# after every change and commit index.html + starhermit-files.json.
+launch=index.html
+engine.api=1
+engine.entry=native/main.ts
+engine.version=1.17.1
+engine.minor=19
+engine.capabilities=platform,storage,clipboard
+
+# Keyboard controls (players rebind keys and pads in the runtime's Options).
+# Letters A–Z typed on the play screen pick the first free biscuit showing
+# that letter and are not bindable; an Undo, Hint, Pause or Camera key on a
+# letter types while the tray (the letters field, a biscuit, or nothing) has
+# the focus and acts elsewhere. Escape with an empty hand pauses. Biscuits
+# and every button are also played with the pointer, touch, or Tab and Enter.
 control.next=ArrowRight+ArrowDown | Next letter
 control.prev=ArrowLeft+ArrowUp | Previous letter
 control.submit=Enter | Submit word
@@ -13,3 +31,21 @@ control.pause=KeyP | Pause
 control.undo=KeyU | Undo
 control.hint=KeyH | Hint
 control.camera=KeyR | Reset camera
+engine.group.next=Tray
+engine.group.undo=Tools
+engine.group.pause=Round
+
+# Gamepad defaults: the D-pad or left stick moves through the biscuits and
+# buttons and South picks the focused one (the runtime's UI navigation); the
+# shoulders step through the biscuits, North submits, West unpicks the last
+# letter, Select clears the hand, the left trigger undoes, the right trigger
+# takes a hint, the right stick press resets the camera, Start pauses.
+engine.gamepad.next=RightShoulder
+engine.gamepad.prev=LeftShoulder
+engine.gamepad.submit=North
+engine.gamepad.unpick=West
+engine.gamepad.clear=Select
+engine.gamepad.pause=Start
+engine.gamepad.undo=LeftTrigger
+engine.gamepad.hint=RightTrigger
+engine.gamepad.camera=RightStickPress

@@ -1,0 +1,169 @@
+/* Letter Pantry — the browser build's style.css rewritten class-based for the
+   engine's UI (`npm run css` converts it into assets/ui-style.json).
+   Element selectors, ids, attribute selectors and @media do not convert:
+   every widget names its classes, and the breakpoints (desktop ≥ 1024 px,
+   tablet, portrait phone ≤ 760 px, landscape phone ≤ 900 px wide) are
+   layouts picked in native/screens.ts. High contrast, larger text and
+   reduced motion are the runtime's options; native/style.ts swaps the
+   high-contrast and colour-vision-safe tokens. */
+
+:root {
+  --bg: #2a1d12;
+  --panel: #261a10eb;
+  --text: #f5e9d5;
+  --dim: #f5e9d5bf;
+  --accent: #ffc978;
+  --accent-dark: #8a5f36;
+  --danger: #e0705a;
+  --focus: #ffe2b0;
+  --btn: #4a3520;
+  --btn-hover: #5a4228;
+  --primary-hover: #9a7040;
+  --found: #8a5f36;
+  --card: #ffffff0d;
+  --slot: #ffffff0f;
+  --biscuit: #d9a860;
+  --biscuit-ink: #4a2c12;
+  --biscuit-edge: #8a5f36;
+}
+
+* { box-sizing: border-box; }
+
+/* ------------------------------------------------------------- text */
+.body { color: var(--text); font-size: 16px; }
+.logo { color: var(--accent); font-size: 48px; font-weight: 700; letter-spacing: 0.04em; }
+.logo-small { color: var(--accent); font-size: 36px; font-weight: 700; letter-spacing: 0.04em; }
+.tagline { color: var(--dim); font-size: 16px; }
+.version { color: #f5e9d580; font-size: 12px; }
+.player-status { color: #f5e9d5a6; font-size: 12.8px; }
+.h2 { color: var(--text); font-size: 24px; font-weight: 700; }
+.h3 { color: var(--accent); font-size: 17px; font-weight: 700; }
+.note { color: #f5e9d5e6; font-size: 16px; }
+.small { color: var(--dim); font-size: 13.6px; }
+.mode-meta { color: #f5e9d5bf; font-size: 13.6px; }
+.hud-heading { color: var(--accent); font-size: 16.8px; font-weight: 700; }
+.objective { color: var(--text); font-size: 14.4px; }
+.bonus { color: #f5e9d5cc; font-size: 13.6px; }
+.status { color: var(--text); font-size: 16px; }
+.score-value { color: var(--accent); font-size: 20.8px; font-weight: 700; }
+.current { color: var(--accent); font-size: 32px; font-weight: 700; letter-spacing: 0.3em; }
+.countdown { color: var(--accent); font-size: 64px; font-weight: 700; }
+.lesson-h { color: var(--text); font-size: 15.2px; font-weight: 700; }
+.lesson-p { color: var(--text); font-size: 14.4px; }
+.help-h { color: var(--accent); font-size: 15.2px; font-weight: 700; }
+.help-p { color: var(--text); font-size: 14px; }
+.dt { color: var(--text); font-size: 16px; font-weight: 700; }
+.dd { color: var(--text); font-size: 16px; }
+.total { color: var(--accent); font-size: 16px; font-weight: 700; }
+.caption { color: var(--text); font-size: 16px; }
+.slot-text { color: var(--text); font-size: 16px; font-weight: 700; letter-spacing: 0.25em; }
+.slot-text-found { color: #ffffff; font-size: 16px; font-weight: 700; letter-spacing: 0.25em; }
+.stage-tier { color: #f5e9d5b3; font-size: 12px; }
+.toast-text { color: var(--text); font-size: 16px; }
+.fieldset-legend { color: var(--accent); font-size: 16px; }
+.error-h { color: var(--danger); font-size: 24px; font-weight: 700; }
+
+/* ------------------------------------------------------------- panels */
+.panel {
+  background: var(--panel); border: 2px solid var(--accent-dark); border-radius: 14px;
+  padding: 24px 32px; box-shadow: 0 12px 40px #00000080;
+}
+.title-panel {
+  background: linear-gradient(#1e140ce0, #18100af2), url(../assets/title-backdrop.webp) center 40% / cover;
+  border: 2px solid var(--accent-dark); border-radius: 14px;
+  padding: 24px 32px; box-shadow: 0 12px 40px #00000080;
+}
+.rail { background: var(--panel); border: 1px solid var(--accent-dark); border-radius: 12px; padding: 12.8px; }
+.mode-card { background: var(--card); border: 1px solid var(--accent-dark); border-radius: 10px; padding: 14.4px; }
+.help-card { background: var(--card); border-radius: 8px; padding: 11.2px; }
+.lesson-box { background: #ffc9781f; border: 1px solid var(--accent); border-radius: 8px; padding: 11.2px; }
+.fieldset { border: 1px solid var(--accent-dark); border-radius: 8px; padding: 8px 12px 12px 12px; }
+.slot { background: var(--slot); border-radius: 6px; padding: 4px 9.6px; }
+.slot-found { background: var(--found); border-radius: 6px; padding: 4px 9.6px; }
+.total-row { border-top: 2px solid var(--accent); border-radius: 0; padding: 4px 0 0 0; }
+.toast { background: var(--panel); border: 1px solid var(--accent); border-radius: 10px; padding: 9.6px 16px; box-shadow: 0 6px 20px #00000073; }
+.shade { background: #00000099; }
+.results-art {
+  background: url(../assets/results-tray.webp) center / cover;
+  border: 2px solid var(--accent-dark); border-radius: 12px; box-shadow: 0 6px 18px #00000073;
+}
+
+/* ------------------------------------------------------------- buttons */
+.btn {
+  min-height: 44px; min-width: 44px; padding: 8.8px 19.2px;
+  border: 2px solid var(--accent-dark); border-radius: 10px;
+  background: var(--btn); color: var(--text); font-size: 16px; text-align: center;
+}
+.btn:hover { background: var(--btn-hover); }
+.btn:disabled { opacity: 0.45; }
+.btn:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+.btn-start {
+  min-height: 44px; min-width: 44px; padding: 8.8px 19.2px;
+  border: 2px solid var(--accent-dark); border-radius: 10px;
+  background: var(--btn); color: var(--text); font-size: 16px; text-align: start;
+}
+.btn-start:hover { background: var(--btn-hover); }
+.btn-start:disabled { opacity: 0.45; }
+.btn-start:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+.btn-primary {
+  min-height: 44px; min-width: 44px; padding: 8.8px 19.2px;
+  border: 2px solid var(--accent); border-radius: 10px;
+  background: var(--accent-dark); color: #ffffff; font-size: 16px; text-align: center;
+}
+.btn-primary:hover { background: var(--primary-hover); }
+.btn-primary:disabled { opacity: 0.45; }
+.btn-primary:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+.btn-big {
+  min-height: 44px; min-width: 44px; padding: 14px 36px;
+  border: 2px solid var(--accent); border-radius: 10px;
+  background: var(--accent-dark); color: #ffffff; font-size: 20px; text-align: center;
+}
+.btn-big:hover { background: var(--primary-hover); }
+.btn-big:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+.btn-big-plain {
+  min-height: 44px; min-width: 44px; padding: 14px 36px;
+  border: 2px solid var(--accent-dark); border-radius: 10px;
+  background: var(--btn); color: var(--text); font-size: 20px; text-align: center;
+}
+.btn-big-plain:hover { background: var(--btn-hover); }
+.btn-big-plain:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+.btn-danger {
+  min-height: 44px; min-width: 44px; padding: 8.8px 19.2px;
+  border: 2px solid var(--danger); border-radius: 10px;
+  background: var(--btn); color: var(--text); font-size: 16px; text-align: center;
+}
+.btn-danger:hover { background: var(--btn-hover); }
+.btn-danger:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+.btn-done {
+  min-height: 44px; min-width: 44px; padding: 6.4px 9.6px;
+  border: 2px solid var(--accent); border-radius: 10px;
+  background: var(--btn); color: var(--accent); font-size: 16px; text-align: start;
+}
+.btn-done:hover { background: var(--btn-hover); }
+.btn-done:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+.btn-stage {
+  min-height: 44px; min-width: 44px; padding: 6.4px 9.6px;
+  border: 2px solid var(--accent-dark); border-radius: 10px;
+  background: var(--btn); color: var(--text); font-size: 16px; text-align: start;
+}
+.btn-stage:hover { background: var(--btn-hover); }
+.btn-stage:disabled { opacity: 0.45; }
+.btn-stage:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+
+/* The letter biscuits (style.css .lp-letter). */
+.letter {
+  border: 3px solid var(--biscuit-edge); border-radius: 16px; background: var(--biscuit);
+}
+.letter:hover { background: #e2b46e; }
+.letter:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+.letter-sel {
+  border: 3px solid var(--biscuit-edge); border-radius: 16px; background: var(--accent);
+  box-shadow: 0 10px 18px #00000080, 0 0 0 3px var(--focus);
+}
+.letter-sel:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+
+.field {
+  min-height: 40px; padding: 6px 10px; border: 2px solid var(--accent-dark); border-radius: 10px;
+  background: #1c130bcc; color: var(--text); font-size: 16px;
+}
+.field:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }

@@ -206,6 +206,11 @@ export class Session {
   }
 }
 
+// The session clock: performance.now() by default; the engine client sets the
+// runtime's fixed-step clock (setClock) so rounds replay exactly.
+let clock = null;
+export function setClock(fn) { clock = typeof fn === 'function' ? fn : null; }
 function nowMs() {
+  if (clock) return clock();
   return (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
 }

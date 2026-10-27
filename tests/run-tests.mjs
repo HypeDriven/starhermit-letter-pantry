@@ -7,13 +7,8 @@ import { fileURLToPath } from 'node:url';
 
 import * as rules from '../rules.js';
 import * as content from '../content.js';
-import { Session, loadJSON, saveJSON } from '../session.js';
-import fs from 'node:fs';
-import { createPlatform } from '../platform.js';
-// gpu-level.js is a classic script in the page (CommonJS here); install it as the page global.
-globalThis.StarHermitGpu = (await import('../gpu-level.js')).default;
-import * as gfx from '../gfx.js';
-import { GFX_STRINGS, pickLocale, gfxT } from '../gfx-i18n.js';
+import { Session, loadJSON, saveJSON, setClock } from '../session.js';
+import { createServer } from 'node:net';
 
 const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 
@@ -321,59 +316,8 @@ await test('session: envelope records hashes and terminal result', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Platform adapter
+// The resumable snapshot and the engine clock (session.js's localStorage, the engine's device storage)
 
-// The adapter runs over the real shared SDK with a stubbed fetch + launch hash.
-const SDK_SRC = fs.readFileSync(path.join(ROOT, 'starhermit-sdk.js'), 'utf8');
-function loadSdk() {
-  const mod = { exports: {} };
-  new Function('module', 'exports', 'self', SDK_SRC)(mod, mod.exports, globalThis);
-  return mod.exports;
-}
-const SH_USER = 'a1b2c3d4-0000-4000-8000-000000000001';
-const SH_SLUG = 'letter-pantry';
-function shFixture(href, shared = { slot: null, etag: null, version: 0 }) {
-  const b64url = (o) => Buffer.from(JSON.stringify(o)).toString('base64url');
-  const jwt = `${b64url({ alg: 'none' })}.${b64url({ sub: SH_USER, game_scope: SH_SLUG, exp: Math.floor(Date.now() / 1000) + 3600 })}.sig`;
-  const u = new URL(href.replace('{jwt}', jwt));
-  const win = {
-    location: { href: u.href, hostname: u.hostname, pathname: u.pathname, search: u.search, hash: u.hash, origin: u.origin, assign() {} },
-    history: { state: null, replaceState(_s, _t, url) { win.replaced = url; } },
-  };
-  const calls = [];
-  const kv = { music: 0.2 };
-  const res = (status, body, bytes) => ({
-    ok: status >= 200 && status < 300, status,
-    text: async () => (body == null ? '' : JSON.stringify(body)),
-    arrayBuffer: async () => bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength),
-  });
-  const fetch = async (url, init = {}) => {
-    const method = init.method || 'GET';
-    const body = init.body ? JSON.parse(init.body) : undefined;
-    calls.push({ url, method, body, auth: (init.headers || {}).Authorization });
-    if (url === `/api/v1/users/${SH_USER}/profile`) return res(200, { nickname: 'Baker Bo', username: 'secretname' });
-    const savePath = `/api/v1/me/cloud-saves/${encodeURIComponent('game:' + SH_SLUG)}`;
-    if (url === savePath + '/info') return res(200, shared.slot ? { exists: true, etag: shared.etag } : { exists: false });
-    if (url === savePath) {
-      // Conditional writes like the platform: stale If-Match / If-None-Match → 412.
-      if (method === 'PUT') {
-        const h = init.headers || {};
-        if ((h['If-Match'] && h['If-Match'] !== shared.etag) || (h['If-None-Match'] === '*' && shared.slot)) return res(412, { error: 'precondition_failed', etag: shared.etag });
-        shared.slot = new Uint8Array(Buffer.from(body.dataBase64, 'base64'));
-        shared.etag = '"v' + (++shared.version) + '"';
-        return res(200, { etag: shared.etag });
-      }
-      return shared.slot ? res(200, null, shared.slot) : res(404);
-    }
-    if (url === `/api/v1/games/${SH_SLUG}/settings`) {
-      if (method === 'PATCH') Object.assign(kv, body.settings);
-      return res(200, { settings: kv });
-    }
-    return res(404);
-  };
-  const sh = loadSdk().create({ window: win, fetch });
-  return { sh, win, calls, kv, platform: createPlatform({ sh }) };
-}
 const memStore = new Map();
 globalThis.localStorage = {
   getItem: (k) => (memStore.has(k) ? memStore.get(k) : null),
@@ -381,109 +325,61 @@ globalThis.localStorage = {
   removeItem: (k) => memStore.delete(k),
 };
 
-await test('platform: launch token read + stripped; profile nickname; Bearer', async () => {
-  const { platform: p, win, calls } = shFixture('https://letter-pantry.starhermit.com/#game_token={jwt}');
-  assert.equal(p.init(), true);
-  assert.equal(p.active, true);
-  assert.equal(p.sub, SH_USER);
-  assert.equal(p.slug, SH_SLUG);
-  assert.ok(!String(win.replaced).includes('game_token'));
-  assert.equal(await p.loadOwnProfile(), 'Baker Bo');
-  assert.match(calls[0].auth, /^Bearer /);
-  assert.ok(!calls.some((c) => c.url.includes('/api/v1/me/') && !c.url.includes('cloud-saves')));
+await test('session: an injected clock (the engine\'s fixed steps) drives elapsed time and pauses', () => {
+  let now = 1000;
+  setClock(() => now);
+  try {
+    const session = new Session(content.JOURNEY[1], { autoPause: false });
+    now += 500;
+    assert.equal(session.elapsedMs(), 500);
+    session.pause('user');
+    now += 10000;
+    assert.equal(session.elapsedMs(), 500);
+    session.resume('user');
+    now += 250;
+    const r = session.dispatch({ type: 'select', index: 0 });
+    assert.ok(r.ok);
+    assert.equal(session.state.elapsedMs, 750);
+    session.dispose();
+  } finally { setClock(null); }
 });
 
-await test('platform: cloud save round-trips at game:<slug>', async () => {
-  const { platform: p, calls } = shFixture('https://x.example/#game_token={jwt}');
-  p.init();
-  saveJSON('stats', { roundsCompleted: 9 });
-  p.markDirty();
-  await p.flushSave();
-  const put = calls.find((c) => c.method === 'PUT');
-  assert.equal(put.url, '/api/v1/me/cloud-saves/game%3Aletter-pantry');
-  saveJSON('stats', { roundsCompleted: 0 });
-  assert.equal(await p.loadCloud(), true);
-  assert.deepEqual(loadJSON('stats'), { roundsCompleted: 9 });
-  assert.equal(p.syncStatus, 'synced');
-});
-
-await test('platform: a stale cloud write (412) reloads, merges both sides and saves again', async () => {
-  const shared = { slot: null, etag: null, version: 0 };
-  const a = shFixture('https://x.example/#game_token={jwt}', shared);
-  const b = shFixture('https://x.example/#game_token={jwt}', shared);
-  a.platform.init(); b.platform.init();
+await test('session: a round in progress survives as last-snapshot and restores (Resume saved round)', () => {
   memStore.clear();
-  await a.platform.loadCloud(); await b.platform.loadCloud(); // both read the empty slot
-  // Device A saves first.
-  saveJSON('progression', { completedStages: ['j1', 'j2'] });
-  saveJSON('stats', { roundsCompleted: 5, targetWordsFound: 40 });
-  a.platform.markDirty(); await a.platform.flushSave();
-  // Device B (its own local data) saves second: refused, merged, saved again.
-  saveJSON('progression', { completedStages: ['j3'] });
-  saveJSON('stats', { roundsCompleted: 2, targetWordsFound: 70 });
-  saveJSON('boards', { daily: { s1: { score: 300 } } });
-  let merged = 0;
-  b.platform.onMerged = () => { merged++; };
-  b.platform.markDirty();
-  assert.equal(await b.platform.flushSave(), false, 'stale write refused');
-  for (let i = 0; i < 50 && (!merged || b.sh.saveConflicted()); i++) await new Promise((res) => setTimeout(res, 5));
-  await b.platform.flushSave();
-  assert.equal(merged, 1);
-  assert.deepEqual(loadJSON('progression').completedStages.sort(), ['j1', 'j2', 'j3']);
-  assert.deepEqual(loadJSON('stats'), { roundsCompleted: 5, targetWordsFound: 70 });
-  memStore.clear();
-  const c = shFixture('https://x.example/#game_token={jwt}', shared);
-  c.platform.init();
-  await c.platform.loadCloud();
-  assert.deepEqual(loadJSON('progression').completedStages.sort(), ['j1', 'j2', 'j3'], 'merged doc reached the cloud');
-  assert.equal(loadJSON('boards').daily.s1.score, 300);
-  a.sh.signOut(); b.sh.signOut(); c.sh.signOut();
-});
-
-await test('platform: shared ui.* settings keys are not adopted as game settings', async () => {
-  const { platform: p, kv } = shFixture('https://x.example/#game_token={jwt}');
-  p.init();
-  kv['ui.language'] = { choice: 'de-DE' };
-  assert.deepEqual(await p.loadSettings(), { music: 0.2 });
-});
-
-await test('platform: settings KV load + changed-key patch', async () => {
-  const { platform: p, calls, kv } = shFixture('https://x.example/#game_token={jwt}');
-  p.init();
-  assert.deepEqual(await p.loadSettings(), { music: 0.2 });
-  p.primeSettings({ music: 0.2, effects: 0.8 });
-  p.pushSettings({ music: 0.2, effects: 0.4 });
-  await p.flushSettings();
-  const patch = calls.find((c) => c.method === 'PATCH');
-  assert.equal(patch.url, `/api/v1/games/${SH_SLUG}/settings`);
-  assert.deepEqual(patch.body, { settings: { effects: 0.4 } });
-  assert.equal(kv.effects, 0.4);
-  assert.equal(p.inviteLink(), `https://dashboard.starhermit.com/game-invite/${SH_USER}/${SH_SLUG}`);
-});
-
-await test('platform: standalone makes no fetch and stays local', async () => {
-  const { platform: p, calls } = shFixture('http://localhost:8080/index.html');
-  assert.equal(p.init(), false);
-  assert.equal(await p.loadCloud(), false);
-  assert.deepEqual(await p.loadSettings(), {});
-  assert.equal(await p.fetchLeaderboard(), null);
-  assert.equal(await p.resolveName('abcdefgh'), 'Player abcdef');
-  assert.deepEqual(await p.loadBindings({ pause: ['KeyP'] }), { pause: ['KeyP'] });
-  p.markDirty();
-  p.primeSettings({});
-  p.pushSettings({ music: 1 });
-  await p.flushSave();
-  assert.equal(p.canSignIn(), false);
-  assert.equal(p.inviteLink(), null);
-  assert.equal(calls.length, 0);
-  const onHost = shFixture('https://0b9d6f2e-3c4a-4e5b-9a7c-1d2e3f405162.starhermit.com/');
-  assert.equal(onHost.platform.init(), false);
-  assert.equal(onHost.platform.canSignIn(), true);
-  assert.equal(onHost.calls.length, 0);
+  const d = content.JOURNEY[2];
+  const meta = { mode: 'journey', modeLabel: 'Journey stage 3 — easy', modeKey: ['Journey stage {n} — {tier}', { n: 3, tier: 'easy' }], descriptor: d };
+  const session = new Session(d, { autoPause: false, meta });
+  session.resume('test');
+  for (const c of selectWord(session.state, d.targets[0])) session.dispatch(c);
+  session.dispatch({ type: 'select', index: 0 });
+  assert.ok(loadJSON('last-snapshot'));
+  const back = Session.restoreSnapshot();
+  assert.ok(back);
+  assert.deepEqual(back.state.foundTargets, session.state.foundTargets);
+  assert.deepEqual(back.state.selected, session.state.selected);
+  assert.deepEqual(back.meta.modeKey, meta.modeKey);
+  assert.ok(back.paused, 'restored rounds wait for an explicit resume');
+  back.resume('restore');
+  for (const t of d.targets.slice(1)) {
+    back.dispatch({ type: 'clear' });
+    for (const c of selectWord(back.state, t)) back.dispatch(c);
+  }
+  assert.equal(back.state.terminalReason, 'completed');
+  assert.equal(loadJSON('last-snapshot'), null, 'a finished round is not resumable');
+  session.dispose(); back.dispose();
 });
 
 // ---------------------------------------------------------------------------
 // Server integration
+
+/** A free loopback port (another process may hold a fixed one). */
+function freePort() {
+  return new Promise((resolve, reject) => {
+    const srv = createServer();
+    srv.once('error', reject);
+    srv.listen(0, '127.0.0.1', () => { const { port } = srv.address(); srv.close(() => resolve(port)); });
+  });
+}
 
 async function startServer(port) {
   const proc = spawn(process.execPath, [path.join(ROOT, 'server.js')], {
@@ -507,7 +403,7 @@ async function post(port, pathName, body) {
 }
 
 await test('server: daily derivation parity with client', async () => {
-  const port = 18321;
+  const port = await freePort();
   const proc = await startServer(port);
   try {
     const res = await fetch(`http://127.0.0.1:${port}/api/v1/daily?date=2026-08-29`);
@@ -523,7 +419,7 @@ await test('server: daily derivation parity with client', async () => {
 });
 
 await test('server: score validation accepts valid replay, rejects tampered', async () => {
-  const port = 18322;
+  const port = await freePort();
   const proc = await startServer(port);
   try {
     const date = '2026-08-29';
@@ -577,7 +473,7 @@ await test('server: score validation accepts valid replay, rejects tampered', as
 });
 
 await test('server: path traversal blocked, JSON 404s', async () => {
-  const port = 18323;
+  const port = await freePort();
   const proc = await startServer(port);
   try {
     const res = await fetch(`http://127.0.0.1:${port}/%2e%2e%2fspec.md`);
@@ -588,88 +484,6 @@ await test('server: path traversal blocked, JSON 404s', async () => {
     assert.equal(res3.status, 404);
     assert.deepEqual(Object.keys(await res3.json()), ['error']);
   } finally { proc.kill(); }
-});
-
-await test('gfx: hardware level picks the Auto preset (StarHermit gpu-level.js)', () => {
-  assert.equal(gfx.detectPreset('ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero)), SwiftShader driver)'), 'low');
-  assert.equal(gfx.detectPreset('llvmpipe (LLVM 15.0.7, 256 bits)'), 'low');
-  assert.equal(gfx.detectPreset('ANGLE (AMD, AMD Radeon(TM) Graphics Direct3D11 vs_5_0 ps_5_0, D3D11)'), 'low');
-  assert.equal(gfx.detectPreset('ANGLE (Intel, Intel(R) UHD Graphics 620 Direct3D11)'), 'low');
-  assert.equal(gfx.detectPreset('ANGLE (Intel, Intel(R) Iris(R) Xe Graphics Direct3D11)'), 'balanced');
-  assert.equal(gfx.detectPreset('ANGLE (NVIDIA, NVIDIA GeForce GTX 1070 Direct3D11 vs_5_0 ps_5_0)'), 'high');
-  assert.equal(gfx.detectPreset('ANGLE (NVIDIA, NVIDIA GeForce RTX 4080 Direct3D11 vs_5_0 ps_5_0)'), 'ultra');
-  assert.equal(gfx.detectPreset('ANGLE (NVIDIA, NVIDIA GeForce RTX 5090 Direct3D11 vs_5_0 ps_5_0)'), 'ultra');
-  assert.equal(gfx.detectLevel('NVIDIA GeForce RTX 5090'), 20);
-  assert.equal(gfx.detectLevel('SwiftShader'), 0);
-  for (const [p, lv] of Object.entries(gfx.LEVELS)) assert.equal(gfx.presetForLevel(lv), p);
-  assert.equal(gfx.presetForLevel(9), 'balanced');
-  assert.equal(gfx.presetForLevel(16), 'high');
-  assert.ok(['low', 'balanced'].includes(gfx.detectPreset('Adreno (TM) 740', { mobile: true })), 'mobile Adreno 740 is Balanced at most');
-  assert.equal(gfx.detectPreset('NVIDIA GeForce RTX 5090', { mobile: true }), 'balanced', 'phones/tablets cap at Balanced');
-  assert.equal(gfx.detectPreset('SwiftShader', { mobile: true }), 'low');
-});
-
-await test('gfx: per-preset budgets are explicit, grow from Low to Ultra and scale with the level', () => {
-  const keys = ['material', 'wood', 'letter', 'dough', 'segments', 'sparks', 'dust', 'bloomRes', 'aoRes'];
-  for (const p of gfx.PRESETS) for (const k of keys) assert.ok(k in gfx.BUDGETS[p], `${p}.${k}`);
-  for (let i = 1; i < gfx.PRESETS.length; i++) {
-    const a = gfx.BUDGETS[gfx.PRESETS[i - 1]], b = gfx.BUDGETS[gfx.PRESETS[i]];
-    for (const k of keys.slice(1)) assert.ok(b[k] >= a[k], `${gfx.PRESETS[i]}.${k}`);
-  }
-  assert.deepEqual(gfx.PRESETS.map((p) => gfx.BUDGETS[p].material), ['lambert', 'standard', 'physical', 'physical']);
-  assert.deepEqual(gfx.budget('high', 10), gfx.BUDGETS.high, 'floor level = table');
-  assert.ok(gfx.budget('high', 14).sparks > gfx.BUDGETS.high.sparks, 'sparks grow above the floor');
-  assert.ok(gfx.budget('ultra', 20).sparks <= gfx.BUDGETS.ultra.sparks * 2, 'at most 2x');
-  assert.ok(gfx.budget('ultra', 2).sparks < gfx.BUDGETS.ultra.sparks, 'fewer below the floor');
-  assert.deepEqual(gfx.resolve({ preset: 'low' }, 'low', 0).budget, gfx.BUDGETS.low);
-  assert.equal(gfx.resolve({}, 'ultra', 20).level, 20);
-});
-
-await test('gfx: resolve applies preset, overrides, scale clamp and post flag', () => {
-  const auto = gfx.resolve({}, 'low');
-  assert.equal(auto.preset, 'low');
-  assert.equal(auto.auto, true);
-  assert.equal(auto.shadows, 'off');
-  assert.equal(auto.post, false, 'Low renders without a post chain');
-  assert.equal(auto.adaptive, true);
-  assert.equal(auto.showFps, false);
-  const high = gfx.resolve({ preset: 'high', shadows: 'off', bloom: 'bogus', render_scale: 9 }, 'low');
-  assert.equal(high.preset, 'high');
-  assert.equal(high.auto, false);
-  assert.equal(high.shadows, 'off', 'override wins');
-  assert.equal(high.bloom, gfx.presetTier('high', 'bloom'), 'invalid override falls back to preset');
-  assert.equal(high.renderScale, 2, 'render scale clamps to 200%');
-  assert.equal(high.post, true);
-  assert.equal(gfx.resolve({ render_scale: 0.1 }, 'balanced').renderScale, 0.5);
-  assert.equal(gfx.resolve({ preset: 'nope' }, undefined).preset, 'balanced');
-  for (const p of gfx.PRESETS) {
-    const r = gfx.resolve({ preset: p });
-    for (const [cat, tiers] of Object.entries(gfx.CATEGORIES)) assert.ok(tiers.includes(r[cat]), `${p}.${cat}`);
-  }
-  assert.match(gfx.describe(high, [1280, 800]), /no shadows .* 1280×800 px$/);
-});
-
-await test('gfx: choosing a preset clears overrides but keeps scale/toggles', () => {
-  const saved = { preset: 'high', shadows: 'off', ao: 'high', render_scale: 1.5, adaptive: false, show_fps: true };
-  const next = gfx.choosePreset(saved, 'low');
-  assert.deepEqual(next, { preset: 'low', render_scale: 1.5, adaptive: false, show_fps: true });
-  assert.equal(gfx.choosePreset(saved, 'auto').preset, 'auto');
-  assert.equal(gfx.resolve(next, 'high').shadows, 'off');
-  assert.equal(gfx.resolve(gfx.choosePreset(saved, 'ultra'), 'low').ao, 'high');
-});
-
-await test('gfx: Graphics strings exist in every required locale', () => {
-  const locales = ['en-US', 'en-GB', 'es-419', 'es-ES', 'de-DE', 'fr-FR', 'fr-CA', 'pt-BR', 'it-IT'];
-  const keys = Object.keys(GFX_STRINGS['en-US']);
-  for (const l of locales) {
-    assert.ok(GFX_STRINGS[l], l);
-    for (const k of keys) assert.ok(GFX_STRINGS[l][k], `${l}.${k}`);
-  }
-  assert.equal(pickLocale('de'), 'de-DE');
-  assert.equal(pickLocale('es-MX'), 'es-419');
-  assert.equal(pickLocale('fr-CA'), 'fr-CA');
-  assert.equal(pickLocale('ja-JP'), 'en-US');
-  assert.equal(gfxT('en-US', 'auto', { tier: 'Low' }), 'Auto (detected: Low)');
 });
 
 // ---------------------------------------------------------------------------

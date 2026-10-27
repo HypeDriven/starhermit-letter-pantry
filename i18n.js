@@ -1,16 +1,11 @@
-// Letter Pantry localization core.
+// Letter Pantry localization core (pure: node tests and the engine client
+// share it).
 //
 // Every player-facing string is authored in US English and looked up by that
 // English text: T('Play') → the current locale's translation (en-US is the key
 // itself). Placeholders use {name}. N('…') marks a string for extraction
-// without translating it (the caller translates at display time).
-//
-// The locale comes from sh-language.js (window.StarHermitLanguage): the game's
-// Language setting (`ui.language`), Automatic → the StarHermit account's
-// preferred language → navigator.languages → en-US. `?lang=` forces a locale
-// for the page load (QA links) and hides the selector. A change re-applies
-// `data-i18n` markup, sets <html lang>, and notifies onLanguage listeners so
-// every screen, the HUD and dialogs re-render in place.
+// without translating it (the caller translates at display time). The locale
+// is the runtime's interface language (native/i18n.ts sets it).
 
 import EN_GB from './locales/en-GB.js';
 import { ES_419, ES_ES } from './locales/es.js';
@@ -36,7 +31,6 @@ export const DICTS = {
 
 let lang = 'en-US';
 let dict = DICTS[lang];
-const listeners = new Set();
 
 export function fmt(s, vars) {
   return String(s).replace(/\{(\w+)\}/g, (m, k) => (vars && vars[k] != null ? String(vars[k]) : m));
@@ -55,38 +49,20 @@ export const N = (key) => key;
 
 export function getLang() { return lang; }
 
-export function onLanguage(fn) { listeners.add(fn); return () => listeners.delete(fn); }
-
-/** Re-apply data-i18n (text), data-i18n-aria (aria-label) and data-i18n-title (title) markup. */
-export function applyMarkup(root = globalThis.document) {
-  if (!root?.querySelectorAll) return;
-  for (const node of root.querySelectorAll('[data-i18n]')) node.textContent = T(node.dataset.i18n);
-  for (const node of root.querySelectorAll('[data-i18n-aria]')) node.setAttribute('aria-label', T(node.dataset.i18nAria));
-  for (const node of root.querySelectorAll('[data-i18n-title]')) node.setAttribute('title', T(node.dataset.i18nTitle));
+/** The shipped locale nearest a BCP 47 tag (en-GB, es-ES and fr-CA by region; es-MX → es-419). */
+export function pickLocale(tag) {
+  const s = String(tag || 'en-US');
+  const exact = LOCALES.find((l) => l.toLowerCase() === s.toLowerCase());
+  if (exact) return exact;
+  const [l = '', region = ''] = s.toLowerCase().split('-');
+  if (l === 'en') return ['gb', 'uk', 'ie', 'au', 'nz', 'za', 'in'].includes(region) ? 'en-GB' : 'en-US';
+  if (l === 'es') return region === 'es' ? 'es-ES' : 'es-419';
+  if (l === 'fr') return region === 'ca' ? 'fr-CA' : 'fr-FR';
+  return { de: 'de-DE', pt: 'pt-BR', it: 'it-IT' }[l] || 'en-US';
 }
 
 export function setLocale(next) {
-  const resolved = DICTS[next] ? next : 'en-US';
-  const changed = resolved !== lang;
-  lang = resolved;
+  lang = DICTS[next] ? next : pickLocale(next);
   dict = DICTS[lang];
-  const doc = globalThis.document;
-  if (doc?.documentElement) {
-    doc.documentElement.lang = lang;
-    if (doc.readyState !== 'loading') applyMarkup(doc);
-  }
-  if (changed) for (const fn of [...listeners]) { try { fn(lang); } catch (e) { console.error(e); } }
-}
-
-/** Wire the StarHermit language preference (browser only). Returns the sh-language instance or null. */
-export function initLanguage() {
-  const SHL = globalThis.StarHermitLanguage;
-  let forced = null;
-  try { forced = new URLSearchParams(globalThis.location.search).get('lang'); } catch { /* opaque origin */ }
-  const forcedLocale = forced && SHL ? SHL.match(forced, LOCALES) : null;
-  if (!SHL) { setLocale('en-US'); return null; }
-  return SHL.create({
-    game: 'letter-pantry', supported: LOCALES, panel: !forcedLocale,
-    apply: (locale) => setLocale(forcedLocale || locale),
-  });
+  return lang;
 }
