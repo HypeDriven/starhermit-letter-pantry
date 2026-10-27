@@ -22,7 +22,7 @@ import * as platform from "./platform.ts";
 import {
   app, can, click, command, copyInvite, dailyDate, hasSnapshot, keysFor, leaderboardLine, leaveRound, lessonBox, modeLabel,
   nextStage, openOverlay, openScreen, pauseRound, pickTheme, playChallenge, playDaily, playJourney, playLesson, playPractice, progress,
-  resumeRound, resumeSaved, retry, settings, showTitle, signIn, toggleLetter, typedInField, letterLabel, focusTyping,
+  resumeRound, resumeSaved, retry, settings, showTitle, signIn, toggleLetter, typedInField, letterLabel, focusTyping, pointerActivation,
   TYPE_ID, TYPING, typingFocus,
 } from "./main.ts";
 
@@ -117,8 +117,8 @@ export function drawScreens(): void {
   if (app.focusNext) {
     const age = f.frame - app.openedFrame;
     if (age >= 1) {
-      const target = app.focusNext === TYPING ? typingFocus() : app.focusNext;
-      if (target) ui.setFocus(target);
+      // The typing focus on touch-first devices is none (a tapped biscuit must not keep Enter).
+      ui.setFocus(app.focusNext === TYPING ? typingFocus() : app.focusNext);
     }
     if (age >= 3) app.focusNext = null;
   }
@@ -394,15 +394,16 @@ function objectiveRail(w: number, compact: boolean, small = false): void {
     if (textWidth(text, st) <= ww) ui.style(...st).id(id).label(text);
     else ui.style(...st).id(id).paragraph(text, ww);
   };
+  const headW = compact ? Math.min(w * 0.42, 180) : w;
   const head = (): void => {
-    p(modeLabel(app.meta), compact ? Math.min(w, 180) : w, "hud-heading", "hud-heading");
-    p(T("Find all {n} target words ({found} found).", { n: snap.targets.length, found: snap.foundTargets.length }), compact ? Math.min(w, 180) : w, "objective", "objective");
+    p(modeLabel(app.meta), headW, "hud-heading", "hud-heading");
+    p(T("Find all {n} target words ({found} found).", { n: snap.targets.length, found: snap.foundTargets.length }), headW, "objective", "objective");
   };
   if (compact) {
     // Portrait (style.css ≤ 760 px): heading and objective beside the slots, which wrap in rows.
     ui.row("obj-row", () => {
-      ui.column("obj-head", head, { spacing: 4, width: Math.min(w * 0.42, 180) });
-      ui.column("obj-slots", () => { slots(w - Math.min(w * 0.42, 180) - 12, true); p(T("Bonus words found: {n}", { n: snap.foundBonus.length }), w - Math.min(w * 0.42, 180) - 12, "bonus", "bonus"); }, { spacing: 6 });
+      ui.column("obj-head", head, { spacing: 4, width: headW });
+      ui.column("obj-slots", () => { slots(w - headW - 12, true); p(T("Bonus words found: {n}", { n: snap.foundBonus.length }), w - headW - 12, "bonus", "bonus"); }, { spacing: 6 });
     }, { spacing: 12, width: w });
   } else {
     head();
@@ -480,7 +481,7 @@ function actionRail(w: number, mode: "column" | "row" | "grid", small = false): 
   if (mode === "column") ui.column("actions", () => acts.forEach((b) => button(b, w)), { spacing: 7.2, width: w });
   else if (mode === "grid") {
     const cw = (w - 5.6) / 2;
-    ui.grid("actions", () => acts.forEach((b) => button({ ...b, style: b.style }, cw)), { columns: 2, gap: 5.6, width: w });
+    ui.grid("actions", () => acts.forEach((b) => button({ ...b, style: b.style === "btn-primary" ? "btn-tight-primary" : "btn-tight" }, cw)), { columns: 2, gap: 5.6, width: w });
   } else flow("actions", acts, w, 8, "center");
 }
 function flowItems(items: (() => void)[], w: number): void { ui.row("status-row", () => items.forEach((f) => f()), { spacing: 16, width: w }); }
@@ -529,7 +530,7 @@ function letterButton(i: number, snap: Snapshot, sz: number): void {
   if (r.activated) {
     toggleLetter(i);
     // A click or tap hands the keys back to the letters field (keyboard and pad activation keep the biscuit).
-    if (r.hovered) focusTyping();
+    if (pointerActivation()) focusTyping();
   }
 }
 

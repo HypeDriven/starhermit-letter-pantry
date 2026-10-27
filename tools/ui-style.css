@@ -167,3 +167,21 @@
   background: #1c130bcc; color: var(--text); font-size: 16px;
 }
 .field:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+
+/* Landscape phones (style.css ≤ 900 px landscape): the action rail's two columns, tighter buttons. */
+.btn-tight {
+  min-height: 44px; min-width: 44px; padding: 4.8px 6.4px;
+  border: 2px solid var(--accent-dark); border-radius: 10px;
+  background: var(--btn); color: var(--text); font-size: 15.2px; text-align: center;
+}
+.btn-tight:hover { background: var(--btn-hover); }
+.btn-tight:disabled { opacity: 0.45; }
+.btn-tight:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+.btn-tight-primary {
+  min-height: 44px; min-width: 44px; padding: 4.8px 6.4px;
+  border: 2px solid var(--accent); border-radius: 10px;
+  background: var(--accent-dark); color: #ffffff; font-size: 15.2px; text-align: center;
+}
+.btn-tight-primary:hover { background: var(--primary-hover); }
+.btn-tight-primary:disabled { opacity: 0.45; }
+.btn-tight-primary:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }

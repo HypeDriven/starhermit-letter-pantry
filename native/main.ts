@@ -19,7 +19,7 @@
 // so a hidden window never counts and play scripts replay exactly.
 import "./i18n.ts";
 import { clipboard, frame, onFixedUpdate, onPreferencesChange, onQuit, onRender, onResume, onStart, onSuspend, onUpdate, preferences, setFixedRate } from "starhermit:engine";
-import { bindings, isKeyDown, onAction, onKey, primaryPointer, vibrate } from "starhermit:input";
+import { bindings, isKeyDown, onAction, onKey, onPointerButton, onTouch, primaryPointer, vibrate } from "starhermit:input";
 import * as ui from "starhermit:ui";
 import { onSessionEnded, requestSignIn } from "starhermit:platform";
 import * as audio from "./audio.ts";
@@ -499,6 +499,12 @@ function escape(): void {
   if (app.session && app.session.state.selected.length) command({ type: "clear" });
   else pauseRound();
 }
+
+/** A pointer button or finger lifted this frame or the last (a click or tap activates on its release). */
+let pointerUpFrame = -10;
+onPointerButton((e) => { if (!e.pressed) pointerUpFrame = frame().frame; });
+onTouch((e) => { if (e.phase === "end") pointerUpFrame = frame().frame; });
+export function pointerActivation(): boolean { return frame().frame - pointerUpFrame <= 1; }
 
 const LETTER_ACTIONS = ["undo", "hint", "pause", "camera"];
 let lastKeyCode = "";

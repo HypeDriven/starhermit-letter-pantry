@@ -734,6 +734,76 @@
           "offset": 2
         }
       }
+    },
+    ".btn-tight": {
+      "background": "$btn",
+      "border": {
+        "width": 2,
+        "color": "$accent-dark",
+        "style": "solid"
+      },
+      "radius": 10,
+      "padding": {
+        "top": 4.8,
+        "end": 6.4,
+        "bottom": 4.8,
+        "start": 6.4
+      },
+      "minWidth": 44,
+      "minHeight": 44,
+      "text": {
+        "color": "$text",
+        "size": 15.2,
+        "align": "center"
+      },
+      "hovered": {
+        "background": "$btn-hover"
+      },
+      "focusVisible": {
+        "focusRing": {
+          "width": 3,
+          "color": "$focus",
+          "offset": 2
+        }
+      },
+      "disabled": {
+        "opacity": 0.45
+      }
+    },
+    ".btn-tight-primary": {
+      "background": "$accent-dark",
+      "border": {
+        "width": 2,
+        "color": "$accent",
+        "style": "solid"
+      },
+      "radius": 10,
+      "padding": {
+        "top": 4.8,
+        "end": 6.4,
+        "bottom": 4.8,
+        "start": 6.4
+      },
+      "minWidth": 44,
+      "minHeight": 44,
+      "text": {
+        "color": "#ffffff",
+        "size": 15.2,
+        "align": "center"
+      },
+      "hovered": {
+        "background": "$primary-hover"
+      },
+      "focusVisible": {
+        "focusRing": {
+          "width": 3,
+          "color": "$focus",
+          "offset": 2
+        }
+      },
+      "disabled": {
+        "opacity": 0.45
+      }
     }
   },
   "animations": {},
