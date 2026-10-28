@@ -15,7 +15,7 @@ hiding in that tray has been served.
 | Genre | Single-player anagram / word-finding puzzle |
 | Players | 1, with an asynchronous high-score board |
 | Session | 90 s (Journey stage 1) to ~5 min (hard Daily); a full Journey run is ~2 h |
-| Platforms | The StarHermit engine 1.19.1 (host API 1.21, `engine.minor=19`): natively in the StarHermit client and in desktop and mobile browsers through the engine's web runtime, portrait and landscape |
+| Platforms | The StarHermit engine 1.22.0 (host API 1.21, `engine.minor=19`): natively in the StarHermit client and in desktop and mobile browsers through the engine's web runtime, portrait and landscape |
 | Rendering | `starhermit:scene` for the pantry and biscuits, **plus** a complete `starhermit:ui` layer (focus, keyboard, gamepad, touch, screen readers). The scene is decoration; the UI is the game. |
 | Entry point | `native/main.ts` (`engine.entry`); browsers open the loader `index.html` that `npm run package` writes (`launch=index.html`) |
 
@@ -467,7 +467,7 @@ The product requires en-US, en-GB, es-419, es-ES, de-DE, fr-FR, fr-CA, pt-BR and
 ## 12. StarHermit integration
 
 Manifest (`starhermit.txt`): `name`, `owner`, `server=score-script.js`, `cover=cover.jpg`,
-`launch=index.html`, `engine.api=1`, `engine.entry=native/main.ts`, `engine.version=1.19.1`,
+`launch=index.html`, `engine.api=1`, `engine.entry=native/main.ts`, `engine.version=1.22.0`,
 `engine.minor=19`, `engine.capabilities=platform,storage,clipboard`, one `control.<action>` and one
 `engine.gamepad.<action>` per action (next, prev, submit, unpick, clear, pause, undo, hint, camera).
 
