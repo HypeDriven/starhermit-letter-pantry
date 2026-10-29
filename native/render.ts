@@ -10,20 +10,19 @@
 // camera — an authored pose, pulled back whenever the biscuits would not
 // fit the visible width — kicks briefly on a found word and decays back.
 //
-// From three.js: light intensities are r170's ÷ π (the engine's
-// convention); canvas textures are starhermit:canvas OffscreenCanvases;
+// From three.js: light intensities, the fitted shadow box and texture colour
+// spaces are the page's (minor 28); canvas textures are starhermit:canvas OffscreenCanvases;
 // RoomEnvironment(renderer) + PMREM give the reflections at the game's own
 // environmentIntensity 0.3 (r170 let scene.environment override the glass's
 // envMapIntensity 1.6, so materials keep 1); the post chain (GTAO,
 // UnrealBloom threshold 0.9, the GradeShader in display space, FXAA / SMAA /
-// MSAA) is renderer.ao / bloom / grade / antialias; the fitted orthographic
-// shadow box is the engine's `shadow.distance`. Adaptive resolution, the
+// MSAA) is renderer.ao / bloom / grade / antialias. Adaptive resolution, the
 // pixel-ratio cap and the frame-rate readout are the runtime's. Cosmetic
 // randomness comes from the rules' decoration stream, never the rules'.
 import {
   ACESFilmicToneMapping, AdditiveBlending, BoxGeometry, BufferAttribute, BufferGeometry, CanvasTexture, Color, CylinderGeometry,
   DirectionalLight, DoubleSide, ExtrudeGeometry, Group, HemisphereLight, Mesh, MeshBasicMaterial, MeshLambertMaterial,
-  MeshPhysicalMaterial, MeshStandardMaterial, PerspectiveCamera, PlaneGeometry, PMREMGenerator, PointLight, Points, PointsMaterial,
+  MeshPhysicalMaterial, MeshStandardMaterial, Matrix4, PerspectiveCamera, PlaneGeometry, PMREMGenerator, PointLight, Points, PointsMaterial,
   RepeatWrapping, RingGeometry, RoomEnvironment, Shape, SRGBColorSpace, Vector3, renderer, scene,
   type Material, type Texture,
 } from "starhermit:scene";
@@ -57,15 +56,24 @@ let theme: Theme = Content.themeById("classic");
 const IDLE = { letters: "pantry".split(""), selected: [] as number[] };
 let shown: { letters: string[]; selected: number[] } = IDLE;
 
-// -- lights: warm key with soft shadows, hemisphere fill, the pantry bulb (r170 ÷ π) -------------
-const keyLight = new DirectionalLight(0xfff0dc, 2.0 / PI);
+// -- lights: warm key with soft shadows, hemisphere fill, the pantry bulb (r170 values) -------------
+const keyLight = new DirectionalLight(0xfff0dc, 2.0);
 keyLight.position.set(5, 9, 6);
 keyLight.target.position.set(0, 0.4, -0.8);
 keyLight.shadow.bias = -0.0004;
 keyLight.shadow.normalBias = 0.02;
-keyLight.shadow.distance = 24;
-const fillLight = new HemisphereLight(0xfff2dd, 0x3a2a1a, 0.6 / PI);
-const bulb = new PointLight(0xffc27a, 22 / PI, 16, 1.6);
+keyLight.shadow.radius = 3;
+// Orthographic shadow box fitted tightly around the play region in light space (render.js fitShadowFrustum).
+{
+  const R = { x: [-8, 8], y: [-0.4, 4.6], z: [-4.4, 2.6] };
+  const inv = new Matrix4().lookAt(keyLight.position, keyLight.target.position, new Vector3(0, 1, 0)).setPosition(keyLight.position).invert();
+  const lo = new Vector3(Infinity, Infinity, Infinity), hi = new Vector3(-Infinity, -Infinity, -Infinity), v = new Vector3();
+  for (const x of R.x) for (const y of R.y) for (const z of R.z) { v.set(x, y, z).applyMatrix4(inv); lo.min(v); hi.max(v); }
+  Object.assign(keyLight.shadow.camera, { left: lo.x, right: hi.x, bottom: lo.y, top: hi.y, near: Math.max(0.1, -hi.z - 1), far: -lo.z + 1 });
+  keyLight.shadow.camera.updateProjectionMatrix();
+}
+const fillLight = new HemisphereLight(0xfff2dd, 0x3a2a1a, 0.6);
+const bulb = new PointLight(0xffc27a, 22, 16, 1.6);
 bulb.position.set(-4, 5.4, 1.2);
 scene.add(keyLight, keyLight.target, fillLight, bulb);
 
@@ -251,7 +259,7 @@ function buildEnvironment(): void {
   grad.addColorStop(1, "rgba(0,0,0,0)");
   g2.fillStyle = grad; g2.fillRect(0, 0, 128, 128);
   const shadowPlane = add(new Mesh(new PlaneGeometry(14, 7),
-    new MeshBasicMaterial({ map: canvasTex(gc, null), transparent: true, depthWrite: false })), false, false);
+    new MeshBasicMaterial({ map: canvasTex(gc, null, false), transparent: true, depthWrite: false })), false, false);
   shadowPlane.rotation.x = -PI / 2;
   shadowPlane.position.y = -0.29;
   applyShadowFlags();
@@ -406,8 +414,7 @@ const spriteCanvas = new OffscreenCanvas(64, 64);
   r.addColorStop(0, "rgba(255,255,255,1)"); r.addColorStop(0.35, "rgba(255,255,255,0.6)"); r.addColorStop(1, "rgba(255,255,255,0)");
   g.fillStyle = r; g.fillRect(0, 0, 64, 64);
 }
-const spriteTex = new CanvasTexture(spriteCanvas);
-spriteTex.colorSpace = SRGBColorSpace;
+const spriteTex = new CanvasTexture(spriteCanvas); // NoColorSpace, as the page
 const MAX_PARTICLES = PARTICLE_CAP.high * 3;
 const particleGeo = new BufferGeometry();
 const particlePos = new Float32Array(MAX_PARTICLES * 3);
@@ -513,11 +520,12 @@ export function applyLook(next: Look): void {
     denoise: { lumaPhi: 10, depthPhi: 2, normalPhi: 3, radius: next.ao === "high" ? 6 : 4, rings: 2, samples: next.ao === "high" ? 16 : 8, radiusExponent: 2 },
   };
   // High threshold: only the selection glow, sparks and bright highlights bloom.
-  renderer.bloom = next.bloom ? { strength: 0.4, radius: 0.4, threshold: 0.9, resolution: next.budget.bloomRes } : null;
-  // render.js GradeShader (display space): a gentle S-curve, +7 % saturation, warm highlights and cool
-  // shadows, the 0.3 vignette.
+  // r170 page: UnrealBloomPass 0.4 → 0.4² at minor 29 (r185 bloom).
+  renderer.bloom = next.bloom ? { strength: 0.4 * 0.4, radius: 0.4, threshold: 0.9, resolution: next.budget.bloomRes } : null;
+  // render.js GradeShader (linear, before the output, clamped): a 0.22 S-curve, +7 % saturation, warm
+  // highlights and cool shadows, the 0.3 vignette.
   renderer.grade = next.grade ? {
-    space: "display", contrast: 0.22, saturation: 1.07,
+    space: "linear", overRange: "clip", contrast: 0.22, saturation: 1.07,
     shadows: [0.97, 0.98, 1.03], highlights: [1.04, 1.0, 0.95], split: [0.25, 0.85],
     vignette: { amount: 0.3, inner: 0.3, outer: 0.8, scale: [1, 0.85] },
   } : null;
@@ -590,7 +598,7 @@ export function update(dtIn: number): void {
     b.markerMat.opacity = isSel ? 0.85 : Math.max(0, b.markerMat.opacity - dt * 4);
     b.marker.scale.setScalar(isSel && !reducedMotion ? 1 + Math.sin(f.time * 4) * 0.04 : 1);
   });
-  bulb.intensity = (22 / PI) * (ambient ? 1 + Math.sin(time * 2.1) * 0.04 + Math.sin(time * 5.3) * 0.025 : 1);
+  bulb.intensity = 22 * (ambient ? 1 + Math.sin(time * 2.1) * 0.04 + Math.sin(time * 5.3) * 0.025 : 1);
   updateDust(time, ambient);
   // Sparks fall and fade.
   let write = 0;
@@ -606,9 +614,6 @@ export function update(dtIn: number): void {
   (particleGeo.getAttribute("position") as BufferAttribute).needsUpdate = true;
   particleGeo.setDrawRange(0, write);
   particles.visible = write > 0;
-  // KNOWN ENGINE BUG at engine.minor ≤ 19: attenuated Points count the pixel ratio twice: divide it out.
-  particleMat.size = SPARK_SIZE / Math.max(1, f.scale);
-  dustMat.size = DUST_SIZE / Math.max(1, f.scale);
   // Camera: authored base pose + decaying event kick. Never a cumulative lerp.
   camKick = Math.max(0, camKick - dt * 0.6);
   const kick = reducedMotion ? 0 : camKick;
