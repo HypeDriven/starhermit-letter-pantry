@@ -520,12 +520,12 @@ export function applyLook(next: Look): void {
     denoise: { lumaPhi: 10, depthPhi: 2, normalPhi: 3, radius: next.ao === "high" ? 6 : 4, rings: 2, samples: next.ao === "high" ? 16 : 8, radiusExponent: 2 },
   };
   // High threshold: only the selection glow, sparks and bright highlights bloom.
-  // r170 page: UnrealBloomPass 0.4 → 0.4² at minor 29 (r185 bloom).
-  renderer.bloom = next.bloom ? { strength: 0.4 * 0.4, radius: 0.4, threshold: 0.9, resolution: next.budget.bloomRes } : null;
+  // r170 page: the r176 bloom model with the page's own 0.4 (minor 30).
+  renderer.bloom = next.bloom ? { model: "r176", strength: 0.4, radius: 0.4, threshold: 0.9, resolution: next.budget.bloomRes } : null;
   // render.js GradeShader (linear, before the output, clamped): a 0.22 S-curve, +7 % saturation, warm
   // highlights and cool shadows, the 0.3 vignette.
   renderer.grade = next.grade ? {
-    space: "linear", overRange: "clip", contrast: 0.22, saturation: 1.07,
+    space: "linear", contrastCurve: "s", overRange: "clip", contrast: 0.22, saturation: 1.07,
     shadows: [0.97, 0.98, 1.03], highlights: [1.04, 1.0, 0.95], split: [0.25, 0.85],
     vignette: { amount: 0.3, inner: 0.3, outer: 0.8, scale: [1, 0.85] },
   } : null;
