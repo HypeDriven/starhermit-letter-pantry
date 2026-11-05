@@ -12,8 +12,8 @@
 // into clips once (createClip) — a live synthesis graph makes clip loads
 // fail on the engine's web runtime. The synthesized stand-ins the browser
 // build played while a clip decoded are not ported, so a clip still loading
-// is silent. Clips load once the mixer runs (natively at once, in a browser
-// after the first press), one at a time; rendered clips one a frame.
+// is silent. Every clip starts loading at start-up (the mixer takes them before
+// it runs); the rendered clips, the room tone and the arpeggio wait for it.
 import { context, createClip, loadClip, play as playClip, type AudioClip, type Bus, type Sound } from "starhermit:audio";
 import { Rules } from "./game.ts";
 
@@ -28,20 +28,14 @@ const SAMPLES: Record<string, string> = {
 const INTERFACE = new Set(["uiClick"]);
 
 const clips = new Map<string, AudioClip>();
-const queue: string[] = [];
-let loading = false;
-let wantClips = false;
 let suspended = false;
 
-function load(name: string): void { if (!queue.includes(name) && !clips.has(name)) queue.push(name); }
-function pump(): void {
-  if (loading || !queue.length) return;
-  const name = queue.shift()!;
-  loading = true;
-  loadClip(`sfx/${name}.opus`).then((c) => { clips.set(name, c); loading = false; }, (e: unknown) => { console.warn(`sfx ${name}: ${String(e)}`); loading = false; });
+/** Loads every clip at once (onStart); a cue whose clip is still loading is skipped. */
+export function loadSfx(): void {
+  for (const name of new Set(Object.values(SAMPLES))) {
+    loadClip(`sfx/${name}.opus`).then((c) => { clips.set(name, c); }, (e: unknown) => console.warn(`sfx ${name}: ${String(e)}`));
+  }
 }
-/** Asks for the clips; they load once the mixer runs (see update). */
-export function loadSfx(): void { wantClips = true; }
 
 /** A game event's sample (once loaded). */
 export function play(event: string): void {
@@ -51,7 +45,7 @@ export function play(event: string): void {
   if (!clip) return;
   const bus: Bus = INTERFACE.has(event) ? "interface" : "effects";
   try { playClip(clip, { bus, gain: LEVEL.effects }); }
-  catch { clips.delete(file); load(file); } // a clip the mixer lost: load it again
+  catch { /* the mixer is full this frame: skip it */ }
 }
 
 // -- rendered clips -------------------------------------------------------------------
@@ -108,17 +102,10 @@ export function setIntensity(v: number): void { intensity = Math.max(0, Math.min
 /** A hidden window: the bed and the room tone hold (audio.js suspended its context). */
 export function setSuspended(on: boolean): void { suspended = on; }
 
-/** Each frame: the clips once the mixer runs (one at a time), the rendered notes and room tone one a
- * frame after them, then the room tone by state and the arpeggio's next note by mixer time. */
+/** Each frame once the mixer runs: the rendered notes and room tone one a frame, then the room tone
+ * by state and the arpeggio's next note by mixer time. */
 export function update(): void {
   if (context.state !== "running") return;
-  if (wantClips) {
-    wantClips = false;
-    for (const name of Object.values(SAMPLES)) load(name);
-    return;
-  }
-  pump();
-  if (loading || queue.length) return;
   if (!roomTone) { roomTone = roomToneClip(); return; }
   for (const f of FREQS) if (!notes.has(f)) { notes.set(f, noteClip(f)); return; }
   try {

@@ -505,7 +505,7 @@ function applyShadowFlags(): void {
   const on = shadowsOn();
   renderer.shadowMap.enabled = on;
   keyLight.castShadow = on;
-  if (on) keyLight.shadow.mapSize = look!.shadows;
+  if (on) keyLight.shadow.mapSize = look!.shadows; // the level's size (the engine keeps the game's at minor 23+)
   for (const m of casters) { m.castShadow = on; m.receiveShadow = on; }
   for (const m of receivers) m.receiveShadow = on;
   for (const b of biscuits) { b.mesh.castShadow = on; b.mesh.receiveShadow = on; }
@@ -515,13 +515,14 @@ export function applyLook(next: Look): void {
   if (look && JSON.stringify(look) === JSON.stringify(next)) return;
   const before = look;
   look = next;
-  renderer.ao = next.ao === "off" ? null : {
-    blendIntensity: 0.7, radius: 0.45, distanceExponent: 1.4, thickness: 1.0, scale: 1.0, samples: next.ao === "high" ? 16 : 8, resolution: next.budget.aoRes,
-    denoise: { lumaPhi: 10, depthPhi: 2, normalPhi: 3, radius: next.ao === "high" ? 6 : 4, rings: 2, samples: next.ao === "high" ? 16 : 8, radiusExponent: 2 },
+  const ao = next.ao, full = !!ao && ao.resolution >= 1; // full-resolution AO: the old "high"
+  renderer.ao = ao && {
+    blendIntensity: 0.7, radius: 0.45, distanceExponent: 1.4, thickness: 1.0, scale: 1.0, samples: ao.samples, resolution: ao.resolution,
+    denoise: { lumaPhi: 10, depthPhi: 2, normalPhi: 3, radius: full ? 6 : 4, rings: 2, samples: ao.denoiseSamples, radiusExponent: 2 },
   };
   // High threshold: only the selection glow, sparks and bright highlights bloom.
   // r170 page: the r176 bloom model with the page's own 0.4 (minor 30).
-  renderer.bloom = next.bloom ? { model: "r176", strength: 0.4, radius: 0.4, threshold: 0.9, resolution: next.budget.bloomRes } : null;
+  renderer.bloom = next.bloom === null ? null : { model: "r176", strength: 0.4, radius: 0.4, threshold: 0.9, resolution: next.bloom };
   // render.js GradeShader (linear, before the output, clamped): a 0.22 S-curve, +7 % saturation, warm
   // highlights and cool shadows, the 0.3 vignette.
   renderer.grade = next.grade ? {

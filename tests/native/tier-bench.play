@@ -1,0 +1,27 @@
+# Graphics-tier bench (tools/engine-tier-bench.mjs): Journey stage 1 (fixed stage) measured in play: letters
+# picked by typing, a refused word and two found words with their sparks, the dust and the biscuits.
+until 300 =Play
+frames 20
+click =Play
+until 60 Choose a mode
+frames 10
+click =Start #1
+until 60 stages complete
+frames 10
+click Stage 1: tea
+until 400 Find all 3 target words
+frames 120
+measure start
+type aet
+frames 60
+key Enter 1
+frames 140
+type ate
+frames 40
+key Enter 1
+frames 170
+type eat
+frames 40
+key Enter 1
+frames 170
+measure stop
