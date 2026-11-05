@@ -347,9 +347,7 @@ The runtime's Options choose the graphics level (Auto by the device, or a level)
 map size, AO, bloom, the grade and anti-aliasing are the level's own (`levelSettings()`, the engine's
 table every StarHermit game reads; the tables show each tier's anchor level, and levels above an anchor
 raise them); its quality tier picks the browser build's art preset and budget (`native/quality.ts`),
-and the level's particle budget over the tier's anchor scales the sparks (≤ 2×). Low keeps MSAA although
-the engine's quantum level asks for none: engine 1.36.1's anti-aliasing "off" recolours fog and
-translucent overlays (until engine 1.36.2). Render scale, the pixel-ratio cap, adaptive resolution, the frame-rate limit
+and the level's particle budget over the tier's anchor scales the sparks (≤ 2×). Render scale, the pixel-ratio cap, adaptive resolution, the frame-rate limit
 and the frame-rate readout are the runtime's; the old per-effect overrides are not offered.
 
 | Tier | Shadows | AO | Bloom | Grade | AA | Reflections | Surfaces | Particles | Motion |
