@@ -43,7 +43,7 @@
     "sfx/word-bonus.opus": {"sha256": "ca3c5eb50b49ec56a98741c807ffd14bd383390a4cfb2026ebc701d1dd65924b", "size": 29141},
     "sfx/word-complete.opus": {"sha256": "b0b95dc5922fd46cd14a087252f245419a8ea968cbdb5e8fe8f3a7a65082e5c5", "size": 26057},
     "sh-strings.js": {"sha256": "0052b8cddf34bda4a0fe85d556aa311f3fdc7d82d7d7077b9d6f8e65f1851a0b", "size": 4759},
-    "starhermit.txt": {"sha256": "f9b159d797ff15cfeb7adc7895530dfe1c0e088a2f3c061beab87a24469347f6", "size": 2242},
+    "starhermit.txt": {"sha256": "c7cce03e373ae73443a8ccad61075cb639ae31e359b2cda4a029d0b7d5e0bd91", "size": 2270},
     "words.js": {"sha256": "fcee8f484c216f40e61de8b014716e03c6d6a301e502f42d170d28837d6af421", "size": 51909}
   },
   "excluded": ["LICENSE.md", "coverart.png", "data/", "node_modules/", "package-lock.json", "package.json", "server.js", "sfx/manifest.json", "sfx/manifest.md", "sfx/manifest.txt", "spec.md", "tests/", "tools/", "tsconfig.json"],
