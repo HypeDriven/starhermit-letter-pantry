@@ -30,7 +30,7 @@ hiding in that tray has been served.
 | `native/quality.ts` | The browser build's presets and budgets keyed by the runtime's quality tier |
 | `native/audio.ts` | Sample one-shots per event, the rendered arpeggio bed and room tone on the runtime's buses |
 | `native/platform.ts` | Save (`saves`) with cloud merge and old-save migration, device storage for the resumable round, the game's options (`settings`), invite link, clock, leaderboard read and score posting |
-| `native/i18n.ts`, `i18n.js`, `locales/`, `sh-strings.js` | Localization: the pure `T`/`N` core and per-locale catalogues keyed by the US-English text, account strings, the runtime's interface language |
+| `native/i18n.ts`, `assets/strings.json` | Localization: the pure `T`/`N` core and per-locale catalogues keyed by the US-English text, account strings, the runtime's interface language |
 | `native/style.ts`, `tools/ui-style.css` → `assets/ui-style.json` | The browser build's style sheet, class-based, converted with `starhermit css` (`npm run css`); high-contrast and colour-vision-safe tokens |
 | `native/game.ts` | Typed facade over the shared JS modules |
 | `rules.js` | Pure deterministic rules engine: RNG, commands, scoring, undo, serialization, replay. No DOM, no timers |
@@ -352,7 +352,7 @@ and the frame-rate readout are the runtime's; the old per-effect overrides are n
 
 | Tier | Shadows | AO | Bloom | Grade | AA | Reflections | Surfaces | Particles | Motion |
 |---|---|---|---|---|---|---|---|---|---|
-| Low | off | off | off | off | MSAA | off | plain | off | static |
+| Low | off | off | off | off | off | off | plain | off | static |
 | Balanced | 1024² | off | on | on | FXAA | on | detailed | low | animated |
 | High | 2048² | on | on | on | SMAA | on | detailed | high | animated |
 | Ultra | 4096² | high | on | on | MSAA | on | detailed | high | animated |
@@ -432,10 +432,10 @@ The product requires en-US, en-GB, es-419, es-ES, de-DE, fr-FR, fr-CA, pt-BR and
 - The language is the runtime's interface language (Options › Language, else the account's preferred
   language or the device's); the game's own Language setting is gone. Every string is drawn through
   `T()` each frame, so a change shows on the next frame and the round is untouched.
-- Catalogues in `locales/` are keyed by the US-English text (en-GB lists spelling changes, es-ES and
+- Tables in `assets/strings.json` are keyed by the US-English text (en-GB lists spelling changes, es-ES and
   fr-CA their differences from es-419 and fr-FR). Content copy (themes, achievements, lessons,
   challenges, tiers, captions, refusals) is English data translated at display time. Account strings
-  come from `sh-strings.js`.
+  are the engine's `starhermit.*` strings.
 - **The dictionary is content, not UI.** Word validation is English by construction (`words.js` +
   the derived targets) in every interface language; typed letters are A–Z. A localized word set would
   need per-locale dictionaries and a new `CONTENT_VERSION` so server-side replay stays exact.
@@ -495,7 +495,7 @@ Results and leaderboards follow the platform policy: the only recorded result is
 ## 13. Technical architecture
 
 **Dependency direction.** `rules.js` depends on nothing; `content.js` on `rules.js` + `words.js`;
-`session.js` on both; `progress.js`, `i18n.js` and the locales are pure. The engine client
+`session.js` on both; `progress.js` is pure. The engine client
 (`native/*.ts`) imports them unchanged (`allowJs`); `server.js` imports `rules.js` and `content.js`
 so validation shares one implementation.
 

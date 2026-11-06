@@ -31,10 +31,8 @@ export const LETTER_ID = (i: number): string => `letter-${i}`;
 // ------------------------------------------------------------------ layout
 interface Layout { lw: number; lh: number; sc: number; desktop: boolean; portrait: boolean; landscape: boolean }
 function layoutNow(): Layout {
-  const f = frame();
-  const sc = ui.preferences().scale;
-  const sa = f.safeArea;
-  const lw = Math.max(1, (f.width - sa.left - sa.right) / sc), lh = Math.max(1, (f.height - sa.top - sa.bottom) / sc);
+  const v = ui.viewport!();
+  const lw = Math.max(1, v.width), lh = Math.max(1, v.height), sc = v.scale;
   const portrait = lw <= 760 && lh >= lw;
   const landscape = !portrait && lw <= 900 && lw > lh;
   return { lw, lh, sc, desktop: lw >= 1024, portrait, landscape };
@@ -103,7 +101,6 @@ export function drawScreens(): void {
     case "results": page("results", L, resultsScreen, { max: 620, min: 480 }); break;
   }
   if (app.screen === "play") overlays(L);
-  toast(L);
   if (app.focusNext) {
     const age = f.frame - app.openedFrame;
     if (age >= 1) {
@@ -162,10 +159,9 @@ function titleScreen(w: number): void {
   }, { spacing: 9.6, width: w });
   const line = playerLine();
   if (line) para(line, w, "player-status", "player-line", true);
-  const a = account();
   const row: Btn[] = [];
-  if (!platform.signedIn()) row.push({ id: "btn-signin", text: a.signIn, act: signIn });
-  if (platform.inviteLink()) row.push({ id: "btn-invite", text: a.invite, act: copyInvite });
+  if (!platform.signedIn()) row.push({ id: "btn-signin", text: account("signIn"), act: signIn });
+  if (platform.inviteLink()) row.push({ id: "btn-invite", text: account("invite"), act: copyInvite });
   if (row.length) flow("account-row", row, w, 8, "center");
   para(T("Content {v}", { v: Content.CONTENT_VERSION }), w, "version", "version", true);
 }
@@ -600,12 +596,5 @@ function resultsScreen(w: number, L: Layout): void {
 }
 type Results = NonNullable<typeof app.results>;
 
-// ------------------------------------------------------------------ the toast
-function toast(L: Layout): void {
-  const t = app.toast;
-  if (!t) return;
-  const w = Math.min(L.lw - 32, 420);
-  ui.place("toast", { anchor: "bottom", y: 16 }, () => ui.column("toast-col", () => para(t.text(), w - 34, "toast-text", "toast-text", true), { style: "toast", align: "center" }));
-}
 
 

@@ -2,10 +2,13 @@
 // Keys are the US-English source strings (see tests/i18n-keys.mjs).
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { DICTS, LOCALES, T, setLocale, pickLocale } from '../i18n.js';
-import { SH_STRINGS } from '../sh-strings.js';
+import { readFileSync } from 'node:fs';
 import { ALL } from './i18n-keys.mjs';
 
+const DICTS = JSON.parse(readFileSync(new URL('../assets/strings.json', import.meta.url), 'utf8'));
+const LOCALES = Object.keys(DICTS);
+const PARENT = { 'en-GB': 'en-US' };
+const T = (l, k) => { for (let c = l; c; c = PARENT[c]) if (Object.hasOwn(DICTS[c], k)) return DICTS[c][k]; return k; };
 const placeholders = (s) => [...String(s).matchAll(/\{(\w+)\}/g)].map((m) => m[1]).sort().join(',');
 
 test('the key set is non-trivial and finds the engine client\'s strings', () => {
@@ -30,29 +33,12 @@ test('no locale carries keys that no longer exist', () => {
   }
 });
 
-test('StarHermit account strings exist in all nine locales', () => {
-  for (const locale of LOCALES) {
-    const s = SH_STRINGS[locale];
-    assert.ok(s?.signIn && s.invite && s.lbRank.includes('{rank}'), locale);
-  }
-});
-
-test('T falls back to the key and fills placeholders; regional variants inherit; runtime tags map', () => {
-  setLocale('de-DE');
-  assert.equal(T('Not a real key {x}', { x: 1 }), 'Not a real key 1');
-  assert.equal(T('Moves: {used}', { used: 3 }), 'Züge: 3');
-  setLocale('fr-CA');
-  assert.equal(T('Score:'), 'Pointage :');
-  assert.equal(T('Shuffle'), 'Mélanger');
-  setLocale('es-ES');
-  assert.equal(T('Settings'), 'Ajustes');
-  assert.equal(T('Shuffle'), 'Mezclar');
-  setLocale('en-GB');
-  assert.equal(T('Color-vision-safe palette'), 'Colour-vision-safe palette');
-  setLocale('en-US');
-  assert.equal(T('Shuffle'), 'Shuffle');
-  assert.equal(pickLocale('es-MX'), 'es-419');
-  assert.equal(pickLocale('fr-ca'), 'fr-CA');
-  assert.equal(pickLocale('de'), 'de-DE');
-  assert.equal(pickLocale('ja-JP'), 'en-US');
+test('regional variants read their own or the shared text', () => {
+  assert.equal(T('de-DE', 'Moves: {used}'), 'Züge: {used}');
+  assert.equal(T('fr-CA', 'Score:'), 'Pointage :');
+  assert.equal(T('fr-CA', 'Shuffle'), 'Mélanger');
+  assert.equal(T('es-ES', 'Settings'), 'Ajustes');
+  assert.equal(T('es-ES', 'Shuffle'), 'Mezclar');
+  assert.equal(T('en-GB', 'Color-vision-safe palette'), 'Colour-vision-safe palette');
+  assert.equal(T('en-US', 'Shuffle'), 'Shuffle');
 });

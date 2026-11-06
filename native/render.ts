@@ -602,6 +602,7 @@ export function update(dtIn: number): void {
   bulb.intensity = 22 * (ambient ? 1 + Math.sin(time * 2.1) * 0.04 + Math.sin(time * 5.3) * 0.025 : 1);
   updateDust(time, ambient);
   // Sparks fall and fade.
+  if (pool.length || particles.visible) {
   let write = 0;
   for (const p of pool) {
     p.life -= dt * 1.4;
@@ -615,6 +616,7 @@ export function update(dtIn: number): void {
   (particleGeo.getAttribute("position") as BufferAttribute).needsUpdate = true;
   particleGeo.setDrawRange(0, write);
   particles.visible = write > 0;
+  }
   // Camera: authored base pose + decaying event kick. Never a cumulative lerp.
   camKick = Math.max(0, camKick - dt * 0.6);
   const kick = reducedMotion ? 0 : camKick;

@@ -53,22 +53,21 @@ export const app = {
   resolveSteps: 0,
   results: null as Results | null,
   lb: null as null | "posting" | { posted: boolean; rank: number | null },
-  toast: null as { text: () => string; until: number } | null,
   /** The settings' theme pick (render.js setTheme; until the next round starts). */
   themeOverride: null as string | null,
 };
 export const settings = platform.settings;
 export const progress = (): platform.Progress => platform.progress();
-const now = (): number => frame().time;
 
 // ------------------------------------------------------------------ helpers
 export function announce(text: string, assertive = false): void {
   if (text) ui.announce(text.slice(0, 500), { politeness: assertive ? "assertive" : "polite" });
 }
 /** ui.js toast(): 3.2 s over any screen. */
-export function toast(text: () => string): void {
-  app.toast = { text, until: now() + 3.2 };
-  announce(text());
+let shownToast: ui.Toast | null = null;
+export function toast(text: string): void {
+  shownToast?.dismiss();
+  shownToast = ui.toast!(text, { duration: 3.2, style: ["toast", "toast-text"], dismissible: false });
 }
 /** Menu and chrome buttons' click (letters and the round actions make their own sounds). */
 export function click(): void { audio.play("uiClick"); }
@@ -311,9 +310,8 @@ function postHighScore(total: number, mode: string): void {
 export function leaderboardLine(): string | null {
   const lb = app.lb;
   if (!lb) return null;
-  const a = account();
-  if (lb === "posting") return a.lbPosting;
-  return !lb.posted ? a.lbNotPosted : lb.rank ? a.lbRank.replace("{rank}", String(lb.rank)) : a.lbPosted;
+  if (lb === "posting") return account("leaderboardPosting");
+  return !lb.posted ? account("leaderboardNotPosted") : lb.rank ? account("leaderboardRank", { rank: lb.rank }) : account("leaderboardPosted");
 }
 
 export function leaveRound(): void {
@@ -440,7 +438,7 @@ export function copyInvite(): void {
   if (!link) return;
   let ok = false;
   try { clipboard.writeText(link); ok = true; } catch { ok = false; }
-  toast(() => (ok ? account().copied : account().copyFailed));
+  toast(account(ok ? "inviteCopied" : "inviteFailed"));
 }
 export function signIn(): void { click(); void requestSignIn().catch(() => undefined); }
 export function pickTheme(id: string): void {
@@ -582,7 +580,7 @@ onStart(() => {
   showTitle();
 });
 onPreferencesChange((p) => render.setReducedMotion(p.reducedMotion));
-onSessionEnded(() => toast(() => account().signedOut));
+onSessionEnded(() => toast(account("signedOut")));
 // A hidden window pauses the round's clock (session.js's visibilitychange auto-pause) and resumes it on return
 // unless the player paused.
 onSuspend(() => {
@@ -630,7 +628,6 @@ onUpdate((dt) => {
     audio.play("achievement");
     announce(T("Achievement unlocked."));
   }
-  if (app.toast && app.toast.until < now()) app.toast = null;
 });
 onRender(() => {
   drawScreens();
