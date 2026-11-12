@@ -1,3 +1,4 @@
+import { withLanguageRender as __l10nRender } from "./l10n/menu.ts";
 // Letter Pantry on the StarHermit engine: the entry module (starhermit.txt
 // engine.entry), played natively by the StarHermit client and in browsers by
 // the engine's web runtime. The rules (rules.js), the content and its
@@ -629,11 +630,15 @@ onUpdate((dt) => {
     announce(T("Achievement unlocked."));
   }
 });
-onRender(() => {
+onRender(__l10nRender(() => {
   drawScreens();
   render.update(frameDt);
-});
+}));
 
 /** Content sanity check (bootstrap.js; cheap). */
 export function contentOk(): boolean { return Content.validateContent().ok; }
 platform.onProgressMerged(() => { /* screens read progress() each frame */ });
+
+// localization-runtime:menu
+import { installLanguageMenu as __installLanguageMenu } from "./l10n/menu.ts";
+__installLanguageMenu(false);

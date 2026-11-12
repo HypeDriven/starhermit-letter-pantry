@@ -1,3 +1,5 @@
+// localization-runtime:attached
+import { localizedCanvasFont as __l10nCanvasFont } from "./l10n/font.ts";
 // The pantry on starhermit:scene, as the browser build's render.js drew it
 // with three.js r170: a board wall, the counter with the biscuit tray and
 // its rims, two shelves of jars (glass shells over coloured contents, metal
@@ -301,7 +303,7 @@ function letterTextures(letter: string, detailed: boolean): { map: Texture; bump
     ctx.fillStyle = rgba(shade(theme.biscuit, -0.55), 0.6);
     for (const [x, y] of [[0.2, 0.2], [0.8, 0.2], [0.2, 0.8], [0.8, 0.8]] as const) { ctx.beginPath(); ctx.arc(x * S, y * S, 5, 0, PI * 2); ctx.fill(); }
   }
-  ctx.font = "bold 168px serif";
+  ctx.font = __l10nCanvasFont("bold 168px serif");
   ctx.textAlign = "center"; ctx.textBaseline = "middle";
   if (detailed) {
     ctx.fillStyle = rgba(shade(theme.biscuit, 0.45), 0.8);
@@ -321,7 +323,7 @@ function letterTextures(letter: string, detailed: boolean): { map: Texture; bump
     speckle(bx, S, S, rng, 0x808080, 220);
     bx.fillStyle = "#303030";
     for (const [x, y] of [[0.2, 0.2], [0.8, 0.2], [0.2, 0.8], [0.8, 0.8]] as const) { bx.beginPath(); bx.arc(x * S, y * S, 6, 0, PI * 2); bx.fill(); }
-    bx.font = ctx.font; bx.textAlign = "center"; bx.textBaseline = "middle";
+    bx.font = __l10nCanvasFont(ctx.font); bx.textAlign = "center"; bx.textBaseline = "middle";
     bx.fillStyle = "#4a4a4a";
     bx.fillText(letter.toUpperCase(), S / 2, S / 2 + 11);
     bump = new CanvasTexture(b);
