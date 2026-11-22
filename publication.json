@@ -12,7 +12,7 @@
     "metadataSource": "starhermit.txt",
     "createdAt": "2026-09-01T07:01:02.723067+00:00",
     "coverArtSource": "manifest",
-    "coverArtUpdatedAt": "2026-11-18T17:51:49.736261+00:00",
+    "coverArtUpdatedAt": "2026-11-22T14:20:08.620986+00:00",
     "submittedByUserId": "2712e04e-461b-4d23-81ae-e40b429128a8",
     "submittedByUsername": "starhermit",
     "hosting": {
@@ -22,9 +22,9 @@
       "pinnedCommitSha": null,
       "deployedCommitSha": null,
       "deployError": null,
-      "deployedAt": "2026-11-18T17:51:49.72392+00:00",
+      "deployedAt": "2026-11-22T14:20:08.610185+00:00",
       "externalLaunchUrl": null,
-      "engineVersion": "1.44.1",
+      "engineVersion": "1.47.0",
       "deployWarning": null
     },
     "description": "Rearrange a tray of letter biscuits to discover every hidden word in a cozy word puzzle.",
@@ -36,19 +36,19 @@
     "links": [],
     "isDisabled": false
   },
-  "publishedAt": "2026-11-18T17:51:49.726Z",
-  "sourceCommit": "dd6078aca3657072af5765c8e9fbe0dcfb92c63b",
-  "bytesReceived": 3386128,
-  "archiveSha256": "1d0b15c345c2e938dc549a5dbff57b3d94094122e74575b510427861faff9f73",
+  "publishedAt": "2026-11-22T14:20:09.002Z",
+  "sourceCommit": "4a7e90eb26d4fb1c5c38f9c4bc1a9f51f97ba4ab",
+  "bytesReceived": 3386042,
+  "archiveSha256": "2fc3e3647d8321a7e15ab2b062b637efda3a975cb8c23c8d1a408f45c19bce78",
   "indexSha256": "a4b664c4755b0800c14ce8248b383159e08cd41597fd9efa5628969d5f62fa3b",
   "result": {
     "clientPublished": true,
     "serverImageLoaded": false,
     "imageDigest": null,
-    "bytesReceived": 3386128,
+    "bytesReceived": 3386042,
     "mode": "replace",
     "filesRemoved": 0,
-    "engineVersion": "1.44.1",
+    "engineVersion": "1.47.0",
     "deployWarning": null
   },
   "liveVerification": {
