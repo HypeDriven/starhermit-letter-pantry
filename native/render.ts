@@ -533,6 +533,7 @@ export function applyLook(next: Look): void {
     vignette: { amount: 0.3, inner: 0.3, outer: 0.8, scale: [1, 0.85] },
   } : null;
   renderer.antialias = next.antialias;
+  renderer.motionBlur = next.bloom !== null ? { intensity: 0.25, samples: 8, maxPixels: 16, targetFps: 60, camera: false } : null;
   const b = before?.budget, nb = next.budget;
   const assets = !b || before!.detailed !== next.detailed || b.material !== nb.material || b.wood !== nb.wood || b.letter !== nb.letter
     || b.dough !== nb.dough || b.segments !== nb.segments;
