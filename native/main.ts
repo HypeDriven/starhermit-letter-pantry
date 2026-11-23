@@ -1,3 +1,4 @@
+import { showCursor } from "./cursor.ts";
 import { withLanguageRender as __l10nRender } from "./l10n/menu.ts";
 // Letter Pantry on the StarHermit engine: the entry module (starhermit.txt
 // engine.entry), played natively by the StarHermit client and in browsers by
@@ -571,6 +572,7 @@ let clockMs = 0;
 let hidden = false;
 
 onStart(() => {
+  showCursor();
   setFixedRate(60);
   Sess.setClock(() => clockMs);
   initStyles();
