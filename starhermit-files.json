@@ -40,7 +40,7 @@
     "native/screens.ts": {"sha256": "d7e4ed104d5b51c72cbc68ff168a161684ed42779445eac6e7de4576d9afe6f1", "size": 37301},
     "native/style.ts": {"sha256": "ee3642e229db1b2cd984207f43a517ae8627801fbaf926e99b21b4cbc9d5048f", "size": 3309},
     "progress.js": {"sha256": "b28916c782fdfbe7cfd8545d0bdcfb26fe00ce6acfdf958f83c2f271806bbbe6", "size": 4436},
-    "publication.json": {"sha256": "f1fe5094a7afe22cadf6a37b89b1e60f49a64b762587b85c2ae45d7f4c26a80c", "size": 4298},
+    "publication.json": {"sha256": "53cf00544bafa3f88f6fceb0ea70615b5132aaf72e3de6da0c9331d2832d307b", "size": 4299},
     "rules.js": {"sha256": "1e399272cc9acade425b51f936ede63519bc1573505a1d0c53b2dbcfdddacc64", "size": 17052},
     "score-script.js": {"sha256": "2dbfcf68f98b1c687e6c9539fc400ce5cb22a6bf598881342b55383d22db8948", "size": 2486},
     "session.js": {"sha256": "4672d728fac6ce1836678b359229ab31c65d10c74a01ec3f44a549146c31f6a5", "size": 7805},
