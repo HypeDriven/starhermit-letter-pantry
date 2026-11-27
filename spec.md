@@ -15,7 +15,7 @@ hiding in that tray has been served.
 | Genre | Single-player anagram / word-finding puzzle |
 | Players | 1, with an asynchronous high-score board |
 | Session | 90 s (Journey stage 1) to ~5 min (hard Daily); a full Journey run is ~2 h |
-| Platforms | The StarHermit engine 1.51.0 (host API 1.51, `engine.minor=51`): natively in the StarHermit client and in desktop and mobile browsers through the engine's web runtime, portrait and landscape |
+| Platforms | The StarHermit engine 1.53.0 (host API 1.53, `engine.minor=53`): natively in the StarHermit client and in desktop and mobile browsers through the engine's web runtime, portrait and landscape |
 | Rendering | `starhermit:scene` for the pantry and biscuits, **plus** a complete `starhermit:ui` layer (focus, keyboard, gamepad, touch, screen readers). The scene is decoration; the UI is the game. |
 | Entry point | `native/main.ts` (`engine.entry`); browsers open the loader `index.html` that `npm run package` writes (`launch=index.html`) |
 
@@ -469,8 +469,8 @@ The product requires en-US, en-GB, es-419, es-ES, de-DE, fr-FR, fr-CA, pt-BR and
 ## 12. StarHermit integration
 
 Manifest (`starhermit.txt`): `name`, `owner`, `server=score-script.js`, `cover=cover.jpg`,
-`launch=index.html`, `engine.api=1`, `engine.entry=native/main.ts`, `engine.version=1.51.0`,
-`engine.minor=51`, `engine.capabilities=platform,storage,clipboard`, one `control.<action>` and one
+`launch=index.html`, `engine.api=1`, `engine.entry=native/main.ts`, `engine.version=1.53.0`,
+`engine.minor=53`, `engine.capabilities=platform,storage,clipboard`, one `control.<action>` and one
 `engine.gamepad.<action>` per action (next, prev, submit, unpick, clear, pause, undo, hint, camera).
 
 | Feature | How |
@@ -597,12 +597,14 @@ The string tables include complete regional variants for `fr-BE`, `de-BE`, `en-S
 
 <!-- regional-localization:end -->
 
-## Engine 1.51.0
+## Engine 1.53.0
 
-Browser play uses the StarHermit 1.51.0 web runtime on WebGPU, or WebGL 2 where WebGPU is missing. Automatic ray-traced shadows are enabled on supported Vulkan devices, with mapped-shadow fallbacks elsewhere. Packaging creates block-compressed runtime textures and compressed glTF copies, retaining original image fallbacks.
+Browser play uses the StarHermit 1.53.0 web runtime on WebGPU, or WebGL 2 where WebGPU is missing. Automatic ray-traced shadows are enabled on supported Vulkan devices, with mapped-shadow fallbacks elsewhere. Packaging creates block-compressed runtime textures and compressed glTF copies, retaining original image fallbacks.
 
 The help screen replays through retained native UI while its contents, options, layout and key bindings are unchanged.
 
 Browser rendering uses the engine's asynchronous pipeline creation so newly encountered materials do not stall the page. Native play retains the engine's synchronous pipeline behavior.
 
 Higher graphics tiers use native per-object motion blur for moving pieces and effects. Camera motion stays sharp, lower tiers omit the effect, and the runtime's Motion blur and Reduce motion preferences remain authoritative.
+
+On engine 1.53.0, browser play through WebGL 2 compiles a frame's shader programs together and holds that frame until they are linked, blends skinned meshes in one pass, reuses the window pass's depth, and uses a hardware WebGL 2 context when WebGPU's adapter is software.
