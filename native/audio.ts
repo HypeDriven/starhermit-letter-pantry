@@ -31,7 +31,6 @@ let suspended = false;
 
 /** Loads every clip at once (onStart); a cue whose clip is still loading is skipped. */
 export function loadSfx(): void {
-  void renderBeds().catch((e: unknown) => console.warn(`audio render: ${String(e)}`));
   for (const name of new Set(Object.values(SAMPLES))) {
     loadClip(`sfx/${name}.opus`).then((c) => { clips.set(name, c); }, (e: unknown) => console.warn(`sfx ${name}: ${String(e)}`));
   }
@@ -109,7 +108,17 @@ export function setIntensity(v: number): void { intensity = Math.max(0, Math.min
 export function setSuspended(on: boolean): void { suspended = on; }
 
 /** Each frame once the mixer runs: the room tone by state and the arpeggio's next note by mixer time. */
+let __bedsStarted = false;
+function startBeds(): void {
+  if (__bedsStarted) return;
+  __bedsStarted = true;
+  void (async () => {
+    void renderBeds().catch((e: unknown) => console.warn(`audio render: ${String(e)}`));
+  })();
+}
+
 export function update(): void {
+  startBeds();
   if (context.state !== "running") return;
   if (!roomTone) return;
   try {
